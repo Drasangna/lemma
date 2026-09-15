@@ -2,6 +2,11 @@
 
 A private, provider-neutral workspace for auditable AI-assisted combinatorics research. Axiom persists a six-stage investigation, normalizes every provider response into application-owned schemas, keeps literature and computation tools outside model providers, and produces a print-ready dossier with claim-level provenance.
 
+## Documentation
+
+- [`HOW_TO_USE.md`](HOW_TO_USE.md) — researcher and operator guide.
+- [`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md) — complete architecture, implementation sequence, deployment notes, invariants, limitations, and next-agent prompt.
+
 ## Supported providers
 
 - OpenAI Responses API: `gpt-5.6-luna` and manual `gpt-5.6-sol` deep passes
