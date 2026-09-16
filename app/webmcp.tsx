@@ -26,7 +26,7 @@ async function jsonRequest(url: string, init?: RequestInit) {
   if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `Request failed (${response.status})`);
   return body;
 }
-function refreshVisibleWorkspace() { window.dispatchEvent(new Event("axiom:refresh")); }
+function refreshVisibleWorkspace() { window.dispatchEvent(new Event("lemma:refresh")); }
 
 export function WebMcpRegistration() {
   useEffect(() => {

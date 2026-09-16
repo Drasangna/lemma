@@ -3,8 +3,8 @@ import "katex/dist/katex.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Axiom — AI Mathematics Research",
-  description: "A private, multi-provider workspace for auditable combinatorics research.",
+  title: "Lemma — AI Mathematics Research",
+  description: "A private, local workspace for auditable combinatorics research.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

@@ -15,6 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { BUILT_IN_PROFILES } from "@/lib/run-profiles";
 import type { ModelRef, ProblemSpec, RunProfile, StageOutput } from "@/lib/research-types";
 import { WebMcpRegistration } from "./webmcp";
 
@@ -27,14 +28,7 @@ const stageNotes: Record<(typeof stageIds)[number], string> = {
   normalize: "Definitions and assumptions", evidence: "Metadata plus bounded computation", lemmas: "Evidence-linked candidates",
   proofs: "Two independent approaches", critique: "Counterexamples and gaps", synthesis: "Audit-ready report",
 };
-const ds: ModelRef = { provider: "deepseek", model: "deepseek-flash", reasoning: "low", maxOutputTokens: 3000 };
-const oa: ModelRef = { provider: "openai", model: "gpt-5.6-luna", reasoning: "low", maxOutputTokens: 3000 };
-const allStages = (ref: ModelRef) => Object.fromEntries(stageIds.map((stage) => [stage, { ...ref }])) as RunProfile["stages"];
-const initialProfiles: RunProfile[] = [
-  { id: "deepseek-economy", name: "DeepSeek Economy", totalOutputLimit: 18_000, stages: allStages(ds) },
-  { id: "openai-economy", name: "OpenAI Economy", totalOutputLimit: 18_000, stages: allStages(oa) },
-  { id: "mixed-economy", name: "Mixed Economy", totalOutputLimit: 18_000, stages: { normalize: ds, evidence: ds, lemmas: oa, proofs: oa, critique: oa, synthesis: ds } },
-];
+const initialProfiles: RunProfile[] = Object.values(BUILT_IN_PROFILES);
 const sample: ProblemSpec & { id?: string } = {
   title: "Triangle-free graphs at the extremal boundary", field: "combinatorics",
   statement: "If G is a triangle-free graph on n vertices, then e(G) ≤ floor(n² / 4).",
@@ -62,9 +56,8 @@ function MathFormula({ expression }: { expression: string }) {
 }
 function splitLines(value: string) { return value.split("\n").map((v) => v.trim()).filter(Boolean); }
 function initials(name?: string) { return (name ?? "Researcher").split(/\s+/).slice(0, 2).map((p) => p[0]).join("").toUpperCase(); }
-function startSignIn() { window.open("/signin-with-chatgpt?return_to=/", "_top"); }
 
-export function ResearchWorkspace({ user }: { user: { displayName: string; email: string } | null }) {
+export function ResearchWorkspace({ user }: { user: { displayName: string; email: string } }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | (ProblemSpec & { id?: string })>(sample);
   const [draft, setDraft] = useState(sample);
@@ -84,7 +77,6 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
     return next;
   }, []);
   const loadWorkspace = useCallback(async () => {
-    if (!user) return;
     try {
       const [{ projects: stored, runs }, catalog, profileData] = await Promise.all([
         api<{ projects: Project[]; runs: Array<{ id: string; projectId: string }> }>("/api/projects"),
@@ -97,12 +89,12 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
       const latest = stored[0] ? runs.find((run) => run.projectId === stored[0].id) : undefined;
       if (latest) await loadRun(latest.id);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not load the workspace."); }
-  }, [loadRun, user]);
+  }, [loadRun]);
   useEffect(() => { const timer=window.setTimeout(() => void loadWorkspace(),0); return () => window.clearTimeout(timer); }, [loadWorkspace]);
   useEffect(() => {
     const refresh = () => void loadWorkspace();
-    window.addEventListener("axiom:refresh", refresh);
-    return () => window.removeEventListener("axiom:refresh", refresh);
+    window.addEventListener("lemma:refresh", refresh);
+    return () => window.removeEventListener("lemma:refresh", refresh);
   }, [loadWorkspace]);
 
   const mainResults = useMemo(() => bundle?.results.filter((r) => !r.isDeepPass) ?? [], [bundle]);
@@ -115,7 +107,6 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
   const providerReady = providers.length === 0 || providers.some((p) => p.configured);
 
   async function saveProject() {
-    if (!user) { startSignIn(); return; }
     setBusy(true); setNotice(null);
     try {
       const result = project.id
@@ -128,13 +119,11 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
   function newProject() { const blank = { ...sample, title: "Untitled combinatorics problem", statement: "State the mathematical problem to investigate." }; setProject({ ...blank, id: undefined }); setDraft(blank); setBundle(null); setTab("problem"); }
   async function selectProject(next: Project) {
     setProject(next); setDraft(next); setBundle(null); setNotice(null);
-    if (!user) return;
     const listing = await api<{ runs: Array<{ id: string; projectId: string }> }>("/api/projects");
     const latest = listing.runs.find((run) => run.projectId === next.id);
     if (latest) await loadRun(latest.id);
   }
   async function startRun() {
-    if (!user) { startSignIn(); return; }
     if (!project.id) { setNotice("Save the problem specification before starting a run."); setTab("problem"); return; }
     setBusy(true); setNotice(null);
     try {
@@ -166,10 +155,9 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
     try { await api(`/api/runs/${bundle.run.id}/cancel`, { method: "POST", headers: { "Idempotency-Key": key("cancel") } }); await loadRun(bundle.run.id); setNotice("Run cancelled. Completed stages were preserved."); }
     catch (error) { setNotice(error instanceof Error ? error.message : "Could not cancel the run."); }
   }
-  async function deepen(provider: "openai" | "deepseek") {
+  async function deepen(model: string) {
     if (!bundle) return; setBusy(true); setNotice(null);
-    const model = provider === "openai" ? "gpt-5.6-sol" : "deepseek-v4-pro";
-    try { await api(`/api/runs/${bundle.run.id}/deepen`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key("deepen") }, body: JSON.stringify({ stage: "critique", provider, model, reasoning: "high", maxOutputTokens: 5000 }) }); await loadRun(bundle.run.id); setNotice(`Deep critique saved separately with ${model}.`); }
+    try { await api(`/api/runs/${bundle.run.id}/deepen`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key("deepen") }, body: JSON.stringify({ stage: "critique", model, reasoning: "high", maxOutputTokens: 5000 }) }); await loadRun(bundle.run.id); setNotice(`Deep critique saved separately with ${model}.`); }
     catch (error) { setNotice(error instanceof Error ? error.message : "Deep pass failed."); }
     finally { setBusy(false); }
   }
@@ -182,7 +170,6 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
     if (selected) setProfileDraft(structuredClone(selected));
   }
   async function saveProfile() {
-    if (!user) { startSignIn(); return; }
     setBusy(true); setNotice(null);
     const isSaved = Boolean(profileDraft.id && !initialProfiles.some((p) => p.id === profileDraft.id));
     try {
@@ -191,9 +178,9 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not save the profile."); }
     finally { setBusy(false); }
   }
-  async function reroute(provider: "openai" | "deepseek") {
+  async function reroute(model: string) {
     setBusy(true); setNotice(null);
-    try { await advance({ provider, model: provider === "openai" ? "gpt-5.6-luna" : "deepseek-flash", reasoning: "low", maxOutputTokens: 3000 }); setNotice(`Stage rerouted explicitly to ${provider}.`); }
+    try { await advance({ model, reasoning: "low", maxOutputTokens: 3000 }); setNotice(`Stage rerouted explicitly to ${model}.`); }
     catch (error) { setNotice(error instanceof Error ? error.message : "Rerouted stage failed."); if (bundle) await loadRun(bundle.run.id).catch(() => undefined); }
     finally { setBusy(false); }
   }
@@ -207,12 +194,12 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
       <WebMcpRegistration />
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true">A</div>
-        <div><p className="eyebrow">Axiom</p><p className="brand-subtitle">Research workspace</p></div>
-        <div className="topbar-center"><span className="status-dot" /> Private workspace · {user ? user.displayName : "preview mode"}</div>
+        <div><p className="eyebrow">Lemma</p><p className="brand-subtitle">Research workspace</p></div>
+        <div className="topbar-center"><span className="status-dot" /> Private workspace · {user.displayName}</div>
         <div className="topbar-actions">
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setTab("sources")}><Search /> Search</Button>
           <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={() => { setTab("report"); setTimeout(() => window.print(), 80); }}><Printer /> Export PDF</Button>
-          <div className="avatar" title={user?.email}>{initials(user?.displayName)}</div>
+          <div className="avatar" title={user.email}>{initials(user.displayName)}</div>
         </div>
       </header>
 
@@ -236,12 +223,15 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
           <Tabs value={tab} onValueChange={setTab} className="research-tabs">
             <TabsList variant="line"><TabsTrigger value="run">Research run</TabsTrigger><TabsTrigger value="problem">Problem specification</TabsTrigger><TabsTrigger value="profiles">Run profiles</TabsTrigger><TabsTrigger value="sources">Sources <span className="tab-count">{project.userSources.length + (evidenceResult?.output?.artifacts.length ?? 0)}</span></TabsTrigger><TabsTrigger value="report">Dossier</TabsTrigger></TabsList>
             <TabsContent value="run" className="pt-6">
-              <div className="run-header"><div><p className="section-kicker"><span className={busy ? "pulse-dot" : "status-dot"} /> {runState.toUpperCase()}</p><h2>{bundle ? stageLabels[stageIds[Math.min(currentStage, 5)]] : "Ready for investigation"}</h2><p>Each stage is validated and persisted before the next provider call.</p></div><div className="profile-control"><label htmlFor="run-profile">Run profile</label><Select value={profileId} onValueChange={selectProfile} disabled={Boolean(bundle)}><SelectTrigger id="run-profile"><SelectValue /></SelectTrigger><SelectContent>{runProfiles.map((p) => <SelectItem value={p.id} key={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div></div>
+              <div className="run-header"><div><p className="section-kicker"><span className="status-dot" /> {runState.toUpperCase()}</p><h2>{bundle ? stageLabels[stageIds[Math.min(currentStage, 5)]] : "Ready for investigation"}</h2><p>Each stage is validated and persisted before the next provider call.</p></div><div className="profile-control"><label htmlFor="run-profile">Run profile</label><Select value={profileId} onValueChange={selectProfile} disabled={Boolean(bundle)}><SelectTrigger id="run-profile"><SelectValue /></SelectTrigger><SelectContent>{runProfiles.map((p) => <SelectItem value={p.id} key={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div></div>
               <div className="preflight"><div><strong>{currentProfile.name}</strong><span>{currentProfile.stages.normalize.model} → {currentProfile.stages.synthesis.model}</span></div><div><strong>{currentProfile.totalOutputLimit.toLocaleString()}</strong><span>maximum output tokens</span></div><div><strong>{providers.filter((p) => p.configured).length || "—"}</strong><span>configured providers</span></div></div>
               <div className="run-actions">
                 {!bundle && <Button onClick={startRun} disabled={busy || !providerReady}><Play /> Start dossier run</Button>}
                 {bundle && currentStage < stageIds.length && runState !== "cancelled" && <><Button onClick={advanceOne} disabled={busy}><ChevronRight /> Advance one stage</Button><Button variant="outline" onClick={runRemaining} disabled={busy}>{busy ? <LoaderCircle className="spin" /> : <Play />} Run remaining</Button><Button variant="ghost" onClick={cancelRun}><CircleStop /> Cancel</Button></>}
-                {bundle?.run.status === "failed" && <><Button variant="outline" onClick={advanceOne} disabled={busy}><RotateCcw /> Retry same model</Button><Button variant="ghost" onClick={() => void reroute("deepseek")} disabled={busy}>Reroute to DeepSeek</Button><Button variant="ghost" onClick={() => void reroute("openai")} disabled={busy}>Reroute to OpenAI</Button></>}
+                {bundle?.run.status === "failed" && <>
+                  <Button variant="outline" onClick={advanceOne} disabled={busy}><RotateCcw /> Retry same model</Button>
+                  {(providers[0]?.models.filter((m) => !m.deep) ?? []).map((m) => <Button key={m.id} variant="ghost" onClick={() => void reroute(m.id)} disabled={busy}>Reroute to {m.label}</Button>)}
+                </>}
                 {bundle?.run.status === "cancelled" && <span className="boundary-note"><Pause /> Cancelled; completed results remain stored.</span>}
               </div>
               <div className="stage-list">{stageIds.map((stage, index) => {
@@ -250,16 +240,16 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
                 return <div className={`stage-row ${state}`} key={stage}><div className="stage-number">{state === "done" ? <CircleCheck /> : state === "active" ? <CircleDashed /> : state === "failed" ? <AlertTriangle /> : index + 1}</div><div className="stage-copy"><strong>{stageLabels[stage]}</strong><span>{result ? `${result.requestedModel} · ${(result.usage.outputTokens ?? 0).toLocaleString()} output tokens${result.attempt > 1 ? ` · attempt ${result.attempt}` : ""}` : stageNotes[stage]}</span></div>{state === "active" && <Progress value={54} className="stage-progress" />}{result?.output && <button className="inspect-link" onClick={() => setTab(stage === "synthesis" ? "report" : "sources")}>Inspect <ChevronRight /></button>}</div>;
               })}</div>
               <div className="evidence-grid">
-                <article className="evidence-card"><div className="card-icon blue"><Library /></div><div className="card-heading"><span>Literature scout</span><Badge className="badge-source">SOURCE-SUPPORTED</Badge></div><h3>{evidenceResult?.output?.artifacts.find((a) => a.type === "source")?.title ?? "Crossref and arXiv metadata search"}</h3><p>{evidenceResult?.output?.summary ?? "The evidence stage searches cached public metadata before asking a model to interpret the results."}</p><div className="source-row"><BookOpen /><span><strong>Metadata-only research</strong><small>HTTPS sources · deduplicated · maximum 12</small></span><ChevronRight /></div></article>
-                <article className="evidence-card"><div className="card-icon cyan"><FlaskConical /></div><div className="card-heading"><span>Experiment engine</span><Badge className="badge-compute">COMPUTATION-SUPPORTED</Badge></div><h3>{evidenceResult ? "Bounded deterministic experiment recorded" : `Ready to enumerate through n = ${project.bounds.maxVertices}`}</h3><p>No generated code is executed. The reproducible graph kernel records its algorithm version, parameters, witness, and result.</p><div className="metric-strip"><span><strong>1</strong> batch maximum</span><span><strong>0</strong> arbitrary scripts</span><span><strong>v1</strong> kernel</span></div></article>
+                <article className="evidence-card"><div className="card-icon"><Library /></div><div className="card-heading"><span>Literature scout</span><Badge className="badge-source">SOURCE-SUPPORTED</Badge></div><h3>{evidenceResult?.output?.artifacts.find((a) => a.type === "source")?.title ?? "Crossref and arXiv metadata search"}</h3><p>{evidenceResult?.output?.summary ?? "The evidence stage searches cached public metadata before asking a model to interpret the results."}</p><div className="source-row"><BookOpen /><span><strong>Metadata-only research</strong><small>HTTPS sources · deduplicated · maximum 12</small></span><ChevronRight /></div></article>
+                <article className="evidence-card"><div className="card-icon"><FlaskConical /></div><div className="card-heading"><span>Experiment engine</span><Badge className="badge-compute">COMPUTATION-SUPPORTED</Badge></div><h3>{evidenceResult ? "Bounded deterministic experiment recorded" : `Ready to enumerate through n = ${project.bounds.maxVertices}`}</h3><p>No generated code is executed. The reproducible graph kernel records its algorithm version, parameters, witness, and result.</p><div className="metric-strip"><span><strong>1</strong> batch maximum</span><span><strong>0</strong> arbitrary scripts</span><span><strong>v1</strong> kernel</span></div></article>
               </div>
             </TabsContent>
 
             <TabsContent value="profiles" className="editor-panel">
               <div className="panel-heading"><div><p className="section-kicker">CREDIT CONTROLS</p><h2>Private run profile</h2></div><Button onClick={saveProfile} disabled={busy}>Save profile</Button></div>
               <div className="form-grid"><label>Profile name<Input value={profileDraft.name} onChange={(e) => setProfileDraft({ ...profileDraft, name: e.target.value })} /></label><label>Total output limit<Input type="number" min={1000} max={18000} value={profileDraft.totalOutputLimit} onChange={(e) => setProfileDraft({ ...profileDraft, totalOutputLimit: Number(e.target.value) })} /></label></div>
-              <div className="profile-matrix">{stageIds.map((stage) => <div className="profile-row" key={stage}><strong>{stageLabels[stage]}</strong><Select value={profileDraft.stages[stage].provider} onValueChange={(provider: "openai" | "deepseek") => updateProfileStage(stage, { provider, model: provider === "openai" ? "gpt-5.6-luna" : "deepseek-flash" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="deepseek">DeepSeek</SelectItem><SelectItem value="openai">OpenAI</SelectItem></SelectContent></Select><Input value={profileDraft.stages[stage].model} onChange={(e) => updateProfileStage(stage, { model: e.target.value })} aria-label={`${stage} model`} /><Select value={profileDraft.stages[stage].reasoning} onValueChange={(reasoning: ModelRef["reasoning"]) => updateProfileStage(stage, { reasoning })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">None</SelectItem><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem></SelectContent></Select><Input type="number" min={256} max={5000} value={profileDraft.stages[stage].maxOutputTokens} onChange={(e) => updateProfileStage(stage, { maxOutputTokens: Number(e.target.value) })} aria-label={`${stage} output cap`} /></div>)}</div>
-              <p className="matrix-note">Assignments are explicit. The orchestrator never falls back across providers or starts a paid retry automatically.</p>
+              <div className="profile-matrix">{stageIds.map((stage) => <div className="profile-row" key={stage}><strong>{stageLabels[stage]}</strong><Select value={profileDraft.stages[stage].model} onValueChange={(model: string) => updateProfileStage(stage, { model })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(providers[0]?.models.filter((m) => !m.deep) ?? []).map((m) => <SelectItem value={m.id} key={m.id}>{m.label}</SelectItem>)}</SelectContent></Select><Select value={profileDraft.stages[stage].reasoning} onValueChange={(reasoning: ModelRef["reasoning"]) => updateProfileStage(stage, { reasoning })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">None</SelectItem><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem></SelectContent></Select><Input type="number" min={256} max={5000} value={profileDraft.stages[stage].maxOutputTokens} onChange={(e) => updateProfileStage(stage, { maxOutputTokens: Number(e.target.value) })} aria-label={`${stage} output cap`} /></div>)}</div>
+              <p className="matrix-note">Assignments are explicit. The orchestrator never falls back across models or starts a paid retry automatically.</p>
             </TabsContent>
 
             <TabsContent value="problem" className="editor-panel">
@@ -279,7 +269,7 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
             </TabsContent>
 
             <TabsContent value="report" className="dossier-panel">
-              <div className="report-title"><p className="eyebrow">AXIOM RESEARCH DOSSIER</p><h2>{project.title}</h2><p>{project.statement}</p></div>
+              <div className="report-title"><p className="eyebrow">LEMMA RESEARCH DOSSIER</p><h2>{project.title}</h2><p>{project.statement}</p></div>
               {mainResults.length === 0 && <div className="empty-state">The dossier grows stage by stage. Start the run when the specification is ready.</div>}
               {mainResults.map((result, index) => <section className="report-section" key={result.id}><div className="report-section-number">{String(index + 1).padStart(2, "0")}</div><div><p className="section-kicker">{result.stage.toUpperCase()} · {result.requestedModel}</p><h3>{stageLabels[result.stage as keyof typeof stageLabels]}</h3><p>{result.output?.summary}</p>{result.output?.claims.map((claim) => <div className="report-claim" key={claim.id}><Badge className={`status-${claim.verificationStatus}`}>{claim.verificationStatus}</Badge><span>{claim.text}</span>{claim.warnings.map((warning) => <small key={warning}>{warning}</small>)}</div>)}</div></section>)}
               {mainResults.length > 0 && <section className="audit-appendix"><h3>Audit appendix</h3><p>Claims: {claims.length} · Evidence-linked or internally checked: {supported} · Output usage: {used.toLocaleString()} tokens.</p><p>No model agreement is treated as verification. No non-formal argument is labeled as a formal proof.</p></section>}
@@ -288,9 +278,10 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
         </section>
 
         <aside className="audit-panel">
-          <div className="audit-heading"><div><p className="eyebrow">AUDIT LENS</p><h2>Claim provenance</h2></div><ShieldCheck /></div><div className="audit-score"><div className="score-ring">{claims.length ? Math.round((supported / claims.length) * 100) : 0}<span>%</span></div><div><strong>Evidence coverage</strong><p>{supported} of {claims.length} claims are supported or internally checked.</p></div></div><div className="audit-rule" /><p className="rail-label">SELECTED CLAIM</p><blockquote>{selectedClaim?.text ?? "Select or generate a claim to inspect its evidence chain."}</blockquote><div className="claim-status"><Badge className="badge-internal">{selectedClaim?.verificationStatus?.toUpperCase() ?? "UNVERIFIED"}</Badge><span>Never a formal proof label</span></div>
+          <div className="audit-heading"><div><p className="eyebrow">AUDIT LENS</p><h2>Claim provenance</h2></div><ShieldCheck /></div><div className="audit-score"><div className="score-ring">{claims.length ? Math.round((supported / claims.length) * 100) : 0}%</div><div><strong>Evidence coverage</strong><p>{supported} of {claims.length} claims are supported or internally checked.</p></div></div><div className="audit-rule" /><p className="rail-label">SELECTED CLAIM</p><blockquote>{selectedClaim?.text ?? "Select or generate a claim to inspect its evidence chain."}</blockquote><div className="claim-status"><Badge className="badge-internal">{selectedClaim?.verificationStatus?.toUpperCase() ?? "UNVERIFIED"}</Badge><span>Never a formal proof label</span></div>
           <div className="evidence-chain"><p className="rail-label">EVIDENCE CHAIN</p><div><span className="chain-icon"><Library /></span><span><strong>Literature metadata</strong><small>Crossref, arXiv, or researcher supplied</small></span></div><div><span className="chain-icon"><FlaskConical /></span><span><strong>Finite verification</strong><small>Bounded and reproducible</small></span></div><div><span className="chain-icon warning"><CircleDashed /></span><span><strong>Formal verification</strong><small>Outside this milestone</small></span></div></div>
-          <Button className="deep-button" disabled={!bundle || busy} onClick={() => void deepen("openai")}><Sparkles /> Deepen with Sol</Button><Button variant="outline" className="deep-alt" disabled={!bundle || busy} onClick={() => void deepen("deepseek")}><Sparkles /> Deepen with DeepSeek Pro</Button><p className="deep-note">Each deep pass is separate and limited to 5,000 output tokens.</p>
+          {(providers[0]?.models.filter((m) => m.deep) ?? []).map((m, index) => <Button key={m.id} variant={index === 0 ? "default" : "outline"} className={index === 0 ? "deep-button" : "deep-alt"} disabled={!bundle || busy} onClick={() => void deepen(m.id)}><Sparkles /> Deepen with {m.label}</Button>)}
+          <p className="deep-note">Each deep pass is separate and limited to 5,000 output tokens.</p>
           <div className="provider-status"><p className="rail-label">PROVIDER STATUS</p>{providers.map((provider) => <div key={provider.id}><span className={provider.configured ? "status-dot" : "offline-dot"} />{provider.id}<small>{provider.configured ? "configured" : "secret required"}</small></div>)}</div>
         </aside>
       </div>

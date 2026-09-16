@@ -2,7 +2,6 @@ import { z } from "zod";
 
 export const stageIds = ["normalize", "evidence", "lemmas", "proofs", "critique", "synthesis"] as const;
 export const stageIdSchema = z.enum(stageIds); export type StageId = z.infer<typeof stageIdSchema>;
-export const providerIdSchema = z.enum(["openai", "deepseek"]); export type ProviderId = z.infer<typeof providerIdSchema>;
 export const reasoningSchema = z.enum(["none", "low", "medium", "high"]); export type ReasoningLevel = z.infer<typeof reasoningSchema>;
 export const verificationStatusSchema = z.enum(["source-supported", "computation-supported", "internally-checked", "contested", "unverified"]);
 
@@ -32,9 +31,9 @@ export const stageOutputJsonSchema = {
 } as const;
 
 export type Usage = { inputTokens:number; outputTokens:number; reasoningTokens:number; cachedTokens:number; totalTokens:number };
-export type ModelRef = { provider:ProviderId; model:string; reasoning:ReasoningLevel; maxOutputTokens:number };
+export type ModelRef = { model:string; reasoning:ReasoningLevel; maxOutputTokens:number };
 export type RunProfile = { id:string; name:string; totalOutputLimit:number; stages:Record<StageId,ModelRef> };
-export const modelRefSchema=z.object({provider:providerIdSchema,model:z.string().min(1).max(120),reasoning:reasoningSchema,maxOutputTokens:z.number().int().min(256).max(5000)});
+export const modelRefSchema=z.object({model:z.string().min(1).max(120),reasoning:reasoningSchema,maxOutputTokens:z.number().int().min(256).max(5000)});
 export const runProfileInputSchema=z.object({
   name:z.string().trim().min(3).max(80),
   totalOutputLimit:z.number().int().min(1000).max(18000),

@@ -9,5 +9,5 @@ const roles:Record<StageId,string>={
   critique:"Act as an adversarial referee. Seek counterexamples, circular reasoning, hidden assumptions, and unsupported uniqueness or novelty claims.",
   synthesis:"Act as a research editor. Assemble a dossier that preserves disagreements, negative results, and unresolved questions.",
 };
-export function stageInstructions(stage:StageId){return `${BASE}\n\n${roles[stage]}\nPrompt version: axiom-${stage}-v1.`}
+export function stageInstructions(stage:StageId){return `${BASE}\n\n${roles[stage]}\nPrompt version: lemma-${stage}-v1.`}
 export function stageInput(stage:StageId,problem:ProblemSpec,prior:Array<{stage:string;output:StageOutput}>,tools:unknown[]){return JSON.stringify({task:stage,problem,priorResults:prior,toolEvidence:tools,requirements:{maximumClaims:30,maximumSources:12,proofStrategies:stage==="proofs"?2:undefined}},null,2)}

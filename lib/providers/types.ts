@@ -1,4 +1,4 @@
-import type { ProviderId, ReasoningLevel, StageOutput, Usage } from "../research-types";
+import type { ReasoningLevel, StageOutput, Usage } from "../research-types";
 
 export type ProviderCapabilities = { structuredOutput:boolean; functionTools:boolean; reasoningControls:boolean; streaming:boolean; usageReporting:boolean };
 export type ToolResult = { callId:string; name:string; output:unknown };
@@ -7,11 +7,11 @@ export type ProviderResponse = { output:StageOutput; providerResponseId:string; 
 export type ProviderErrorCode = "not_configured"|"authentication"|"rate_limit"|"quota"|"timeout"|"content_filter"|"invalid_output"|"upstream";
 
 export class ProviderError extends Error {
-  constructor(public provider:ProviderId, public code:ProviderErrorCode, message:string, public retryable:boolean, public status=502){super(message);this.name="ProviderError"}
+  constructor(public provider:string, public code:ProviderErrorCode, message:string, public retryable:boolean, public status=502){super(message);this.name="ProviderError"}
 }
 
 export interface ModelProviderAdapter {
-  readonly providerId:ProviderId;
+  readonly providerId:string;
   readonly capabilities:ProviderCapabilities;
   configuredModels():Array<{id:string;label:string;deep:boolean}>;
   generateStructured(request:GenerateStructuredRequest):Promise<ProviderResponse>;

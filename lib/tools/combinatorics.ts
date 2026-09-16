@@ -10,10 +10,10 @@ const PETERSEN:Edge[]=[[0,1],[1,2],[2,3],[3,4],[4,0],[5,7],[7,9],[9,6],[6,8],[8,
 
 export function runCombinatoricsExperiment(statement:string,maxVertices:number):ExperimentResult{
   const lower=statement.toLowerCase();
-  if((lower.includes("3-regular")||lower.includes("cubic"))&&lower.includes("hamilton"))return{id:"petersen-counterexample",kind:"known-counterexample",algorithmVersion:"axiom-graph-kernel/1",parameters:{property:"cubic_hamiltonian",maxVertices},graphsChecked:1,violations:1,summary:"The Petersen graph is 3-regular and has no Hamiltonian cycle, so it is a counterexample.",witness:{name:"Petersen graph",vertices:10,edges:PETERSEN}};
+  if((lower.includes("3-regular")||lower.includes("cubic"))&&lower.includes("hamilton"))return{id:"petersen-counterexample",kind:"known-counterexample",algorithmVersion:"lemma-graph-kernel/1",parameters:{property:"cubic_hamiltonian",maxVertices},graphsChecked:1,violations:1,summary:"The Petersen graph is 3-regular and has no Hamiltonian cycle, so it is a counterexample.",witness:{name:"Petersen graph",vertices:10,edges:PETERSEN}};
   const n=Math.max(1,Math.min(6,maxVertices));const all=edgeList(n);const total=2**all.length;let checked=0,violations=0;
   for(let mask=0;mask<total;mask++){const edges=selectedEdges(all,mask);if(!triangleFree(n,edges))continue;checked++;if(edges.length>Math.floor(n*n/4))violations++}
-  return{id:`triangle-free-n${n}`,kind:"exhaustive-enumeration",algorithmVersion:"axiom-graph-kernel/1",parameters:{property:"triangle_free_edge_bound",vertices:n,exhaustive:true},graphsChecked:checked,violations,summary:violations===0?`Every triangle-free labeled graph on ${n} vertices satisfies e(G) ≤ ⌊n²/4⌋.`:`Found ${violations} violations among triangle-free graphs on ${n} vertices.`};
+  return{id:`triangle-free-n${n}`,kind:"exhaustive-enumeration",algorithmVersion:"lemma-graph-kernel/1",parameters:{property:"triangle_free_edge_bound",vertices:n,exhaustive:true},graphsChecked:checked,violations,summary:violations===0?`Every triangle-free labeled graph on ${n} vertices satisfies e(G) ≤ ⌊n²/4⌋.`:`Found ${violations} violations among triangle-free graphs on ${n} vertices.`};
 }
 
 export const graphAlgorithms={edgeList,triangleFree,degrees,hasHamiltonianCycle};

@@ -1,145 +1,173 @@
-# How to use Axiom
+# How to use Lemma
 
-Axiom helps a mathematician organize an AI-assisted combinatorics investigation without presenting model agreement as proof. It records every stage, model, tool result, token count, warning, and unresolved gap.
+Lemma helps a mathematician organize an AI-assisted combinatorics investigation without ever presenting model agreement as proof. It records every stage, model, tool result, token count, warning, and unresolved gap — so you can trust the parts that are checked and stay skeptical of the parts that aren't.
 
-## Before your first run
+This guide assumes no software background. If you can open a terminal and copy-paste a command, you can run this.
 
-Open the private workspace:
+## 1. Install the prerequisites
 
-<https://axiom-research-workspace.karabhi2007.chatgpt.site>
+You need [Node.js](https://nodejs.org) version 22.13 or later. To check whether you already have it, open a terminal and run:
 
-Sign in with the ChatGPT account that owns the deployment.
+```sh
+node --version
+```
 
-The deployment operator must configure at least one server-side provider secret:
+If that prints `v22.13.0` or higher, you're set. Otherwise, download and install Node.js from [nodejs.org](https://nodejs.org) (the "LTS" button is fine), then check again.
 
-- `DEEPSEEK_API_KEY` for DeepSeek Economy and DeepSeek Pro.
-- `OPENAI_API_KEY` for OpenAI Economy, Mixed Economy, and Sol.
+## 2. Get an OpenRouter key
 
-Do not paste provider keys into a problem, source, profile, browser field, or chat message. They belong in the Site's production secret settings. When a provider is unavailable, the audit panel says `secret required` and model-backed runs remain disabled.
+Lemma reaches every AI model — OpenAI, DeepSeek, and others — through a single gateway called [OpenRouter](https://openrouter.ai). You only need one key, and OpenRouter lets you set a spending limit so you can't be surprised by a bill.
 
-DeepSeek Economy is the default and is the best starting point when conserving OpenAI credits.
+1. Go to <https://openrouter.ai> and create an account.
+2. Open <https://openrouter.ai/keys> and create a new key.
+3. Copy the key somewhere safe — you'll paste it in the next step.
 
-## Create a research file
+You do not need separate OpenAI or DeepSeek accounts.
+
+## 3. Install and start Lemma
+
+In a terminal, navigate to this project folder and run:
+
+```sh
+npm install
+```
+
+This downloads the project's dependencies — it can take a minute the first time.
+
+Next, create your personal settings file:
+
+```sh
+cp .env.example .env.local
+```
+
+Open `.env.local` in any text editor and paste your OpenRouter key after `OPENROUTER_API_KEY=`, so the line looks like:
+
+```
+OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
+```
+
+Save the file. This file is never uploaded or shared anywhere — it's your local secret.
+
+Now set up the local database and start the app:
+
+```sh
+npm run db:migrate
+npm run dev
+```
+
+Open <http://localhost:3000> in your browser. The workspace loads immediately — there's no sign-in step, since this runs only on your own computer.
+
+To stop the app later, go back to the terminal and press `Ctrl+C`. To use it again, just run `npm run dev` again from the project folder.
+
+## 4. Create a research file
 
 1. Press the plus button next to **Research files**.
-2. Open **Problem specification**.
-3. Enter a clear title and mathematical statement.
+2. Open the **Problem specification** tab.
+3. Enter a clear title and the mathematical statement you're investigating.
 4. Enter definitions, one per line.
 5. Enter assumptions, one per line.
-6. Enter known results, one per line. Distinguish facts you know from results you merely suspect.
-7. Set the finite minimum and maximum vertex bounds. The current deterministic kernel exhaustively enumerates the triangle-free benchmark through six vertices.
-8. Optionally add a citation title, public HTTPS URL, and pasted abstract or note.
-9. Select **Create research file** or **Save changes**.
+6. Enter known results, one per line — distinguish facts you know from results you merely suspect.
+7. Set the minimum and maximum vertex bounds. The built-in computation engine can exhaustively check small graphs (the triangle-free benchmark below works through 6 vertices).
+8. Optionally add a citation title, a public `https://` URL, and a pasted abstract or note.
+9. Select **Create research file**.
 
-Private-network, loopback, local, and non-HTTPS source URLs are rejected. A user-supplied citation is not automatically verified.
+Private-network, local, and non-HTTPS source URLs are rejected. A citation you paste in yourself is not automatically treated as verified — see the labels below.
 
-## Choose a run profile
+## 5. Choose a run profile
 
-Select a profile before creating the run:
+Before starting a run, pick a profile:
 
-- **DeepSeek Economy** uses `deepseek-flash` with low reasoning for every normal stage.
-- **OpenAI Economy** uses `gpt-5.6-luna` with low reasoning for every normal stage.
-- **Mixed Economy** uses DeepSeek for normalization, evidence, and synthesis and OpenAI for lemmas, proofs, and criticism.
+- **DeepSeek Economy** — DeepSeek's chat model, low reasoning, for every stage. Cheapest starting point.
+- **OpenAI Economy** — an OpenAI model, low reasoning, for every stage.
+- **Mixed Economy** — DeepSeek for normalization/evidence/synthesis, OpenAI for lemmas/proofs/critique.
 
-The selected profile and maximum output allowance appear above the start button. A normal run is capped at 18,000 output tokens.
+The selected profile and its maximum output allowance appear above the start button. A normal run is capped at 18,000 output tokens total.
 
-To create a private custom profile:
+To build your own profile:
 
 1. Open **Run profiles**.
-2. Give the profile a unique name.
-3. Set the total output-token limit.
-4. Choose the provider, exact configured model, reasoning level, and output cap for each stage.
-5. Select **Save profile**.
-6. Return to **Research run** and choose the saved profile.
+2. Give it a name and a total output-token limit.
+3. For each stage, choose the model, reasoning level, and per-stage output cap.
+4. Select **Save profile**, then return to **Research run** and choose it.
 
-Axiom never silently changes these assignments.
+Lemma never silently changes these assignments or substitutes a different model on its own.
 
-## Run the investigation
+## 6. Run the investigation
 
-Select **Start dossier run**. Creating the run does not call a provider; it only saves the chosen profile snapshot.
+Select **Start dossier run**. This does not call a model yet — it only saves your chosen profile as a snapshot for this run.
 
 You then have two choices:
 
-- **Advance one stage** runs only the next stage.
-- **Run remaining** proceeds through the remaining stages by making one persisted stage request at a time.
+- **Advance one stage** runs only the next stage, so you can review each result before continuing.
+- **Run remaining** proceeds through the rest of the stages automatically, one persisted request at a time.
 
-The stages are:
+The six stages are:
 
 1. Problem normalization.
 2. Literature metadata and bounded computation.
 3. Candidate lemmas and conjecture refinements.
 4. Two independent proof strategies.
-5. Adversarial criticism and counterexample search.
+5. Adversarial critique and counterexample search.
 6. Dossier synthesis.
 
-Each stage is validated and saved before the next one begins. You can close the browser and return later; the latest run for the selected research file resumes from its stored boundary.
+Each stage is validated and saved to your local database before the next one begins. You can close the browser and come back later — the run picks up exactly where it left off.
 
-## Control credit use
+## 7. Control what you spend
 
 - Review the selected profile and allowance before starting.
-- Use **Advance one stage** when you want maximum control.
-- Exact provider-reported output usage appears in completed stage rows and in the run allowance.
-- Cached and reasoning token categories are stored with the run even when the compact UI does not display every category simultaneously.
-- A run stops before a stage whose configured maximum would exceed the run allowance.
-- A retry never happens automatically.
-- A provider reroute never happens automatically.
-- A deep pass never happens automatically.
-- Currency cost is not estimated because no versioned pricing table is configured.
+- Use **Advance one stage** when you want maximum control over spending.
+- Exact token usage appears on each completed stage and in the running total.
+- A run stops before any stage whose configured cap would exceed your allowance.
+- Nothing retries automatically. Nothing switches models automatically. A deep pass never starts automatically.
 
-## Handle cancellation or failure
+## 8. Handle cancellation or failure
 
-Select **Cancel** to stop the run. Completed stages remain stored.
+Select **Cancel** to stop a run — completed stages stay saved.
 
-If a provider fails, the failed attempt is preserved and the run stops at the current stage. You may then:
+If a stage fails (a bad key, a rate limit, an invalid response), the failed attempt is recorded and the run pauses there. You can then:
 
-- Select **Retry same model** to repeat that stage with the same assignment.
-- Select **Reroute to DeepSeek** or **Reroute to OpenAI** to make an explicit economy-model reroute.
+- Select **Retry same model** to try that stage again with the same model.
+- Select **Reroute to \<model name\>** to explicitly try a different configured model instead.
 
-Rerouting can consume credits from the newly selected provider. Axiom does not infer permission from another provider's failure.
+Rerouting can use a different model's quota. Lemma never infers permission to switch models from a failure — you always choose explicitly.
 
-Authentication errors, rate limits, quota exhaustion, timeouts, content filters, invalid structured output, and general upstream failures are normalized into auditable failure records.
+## 9. Run a deeper critique
 
-## Run a deeper critique
-
-After a run exists, the audit panel offers:
-
-- **Deepen with Sol** using `gpt-5.6-sol`.
-- **Deepen with DeepSeek Pro** using `deepseek-v4-pro`.
+Once a run exists, the audit panel on the right offers one or more **Deepen with \<model\>** buttons (only models you've marked as "deep" in your OpenRouter setup show up here).
 
 A deep pass:
 
-- is a deliberate paid action;
-- is limited to 5,000 output tokens;
-- produces a separate result;
-- does not overwrite the original stage;
-- may use either supported provider regardless of the original provider.
+- is a deliberate, manual action you choose to spend more on;
+- is capped at 5,000 output tokens;
+- produces a separate result that never overwrites the original stage;
+- can use any configured model, regardless of which model ran the original stage.
 
-## Read the evidence and audit labels
+## 10. Read the evidence and audit labels
 
-Open **Sources** to inspect stage summaries, normalized artifacts, provider/model provenance, and recorded metadata.
+Open **Sources** to see stage summaries, normalized artifacts, and exactly which model produced what.
 
-The five labels mean:
+Every claim gets exactly one of five labels:
 
-- **source-supported**: the claim references a recorded literature source.
-- **computation-supported**: the claim references a recorded bounded experiment.
-- **internally-checked**: the argument received internal logical checking but no formal proof verification.
-- **contested**: a critic, counterexample search, or unresolved disagreement challenges it.
-- **unverified**: there is not enough recorded support.
+- **source-supported** — the claim points to a recorded literature source.
+- **computation-supported** — the claim points to a recorded bounded computation.
+- **internally-checked** — the argument received internal logical review, but no formal proof verification.
+- **contested** — a critique, counterexample, or unresolved disagreement challenges it.
+- **unverified** — there isn't enough recorded support yet.
 
-These labels are deliberately conservative. Agreement between providers is not evidence. A finite computation is not a general proof. No non-formal proof attempt is labeled proved.
+There is no "proved" label, on purpose. Two models agreeing is not evidence. A computation checked up to 6 vertices does not prove a statement for all n. No non-formal argument is ever presented as a formal proof — that's the whole point of this tool.
 
-The right-hand **Audit lens** shows evidence coverage and a selected claim's provenance chain. On narrower screens, the audit panel collapses so the investigation remains usable.
+The **Audit lens** on the right shows overall evidence coverage and lets you inspect a claim's provenance chain. On narrow screens this panel is hidden so the main investigation stays usable.
 
-## Export the dossier as PDF
+## 11. Export the dossier as a PDF
 
-1. Open **Dossier** after one or more stages have completed.
-2. Review the problem, stage summaries, claims, warnings, unresolved questions, and audit appendix.
+1. Open **Dossier** once one or more stages have completed.
+2. Review the problem statement, stage summaries, claims, warnings, and open questions.
 3. Select **Export PDF**.
-4. Choose **Save as PDF** in the browser print dialog.
+4. Choose **Save as PDF** in your browser's print dialog.
 
-The print stylesheet removes workspace controls and keeps text selectable. KaTeX equations remain typeset in the saved document.
+Equations render properly in the exported document.
 
-## Suggested first validation projects
+## Suggested first projects
 
 ### Mantel benchmark
 
@@ -147,7 +175,7 @@ Statement:
 
 > If `G` is a triangle-free graph on `n` vertices, then `e(G) ≤ floor(n²/4)`.
 
-Use a maximum bound of six vertices for the current exhaustive kernel. The computation should find no finite counterexample. The literature stage should identify metadata related to Mantel's theorem, while the proof strategies remain non-formal attempts.
+Use a maximum bound of 6 vertices. The computation should find no counterexample within that bound, and the claim should read `computation-supported` rather than `proved`.
 
 ### Petersen counterexample benchmark
 
@@ -155,60 +183,35 @@ Statement:
 
 > Every 3-regular graph is Hamiltonian.
 
-The experiment engine should record the Petersen graph as a 10-vertex counterexample and the claim should remain contested or refuted rather than proved.
+The computation engine should surface the Petersen graph as a 10-vertex counterexample, and the claim should stay `contested` — never `proved` or silently accepted.
 
 ### Fabricated-citation benchmark
 
-Add an invented citation with a public HTTPS-looking URL and pasted abstract. The system must not turn the user-supplied citation into source-supported evidence unless it matches verified literature metadata.
+Add a made-up citation with a plausible-looking `https://` URL. Lemma should not treat it as `source-supported` unless it actually matches literature metadata it looked up itself.
 
-## Use Axiom through an AI agent
+## Advanced: using an AI agent to drive Lemma
 
-When the browser supports WebMCP, the page exposes:
-
-- `create_research_project`
-- `start_dossier_run`
-- `get_research_run`
-
-An agent can create a structured project, create a persisted run with an explicit built-in profile, and read run status through the same authenticated server operations used by the visible interface. Starting a run through WebMCP does not automatically advance paid stages.
-
-Example request to an agent:
-
-> Create a private Axiom combinatorics project for the statement “Every 3-regular graph is Hamiltonian,” use a finite bound of 12 vertices, and start it with DeepSeek Economy. Do not advance a model stage yet.
-
-The user should explicitly authorize later stage advancement if it will consume provider credits.
+If your browser supports WebMCP, the page exposes three tools an AI agent can call directly: `create_research_project`, `start_dossier_run`, and `get_research_run`. An agent can create a structured project and start a run with an explicit built-in profile, using the same local API the visible interface uses. Starting a run this way never advances a paid stage automatically — you still choose when a stage actually runs a model.
 
 ## Troubleshooting
 
-### Start button is disabled
+**The start button is disabled.** No `OPENROUTER_API_KEY` is set. Add it to `.env.local` and restart `npm run dev`.
 
-No provider secret is configured. Add the required production key and redeploy the Site.
+**A stage reports "not configured."** The key is missing or invalid. Double-check `.env.local`, then restart the dev server (environment changes require a restart).
 
-### A stage reports provider not configured
+**A stage stops at the output limit.** The next stage's cap would exceed your profile's total allowance. Edit the profile to raise the limit, or start a fresh run.
 
-The selected profile references a provider whose secret is missing. Configure that provider or explicitly reroute the failed stage to a configured provider.
+**A citation stays unverified.** Expected for anything you typed in yourself that Lemma's own literature search didn't independently confirm.
 
-### A stage stops at the output limit
+**A proof attempt isn't labeled "proved."** Intentional — formal proof verification is outside what this tool does.
 
-The next stage's configured maximum would exceed the profile's total allowance. Create or edit a profile with a deliberate new limit, then start a new run or use an explicitly supported continuation flow.
-
-### A citation remains unverified
-
-This is expected for researcher-supplied or unmatched metadata. Add a valid DOI/arXiv source or let the evidence stage search public metadata.
-
-### A proof attempt is not labeled proved
-
-This is intentional. Formal proof verification is outside milestone one.
-
-### The browser was closed during a run
-
-Open the same research file. Completed stages are stored in D1, and the latest run resumes at its next stage boundary.
+**I closed the browser mid-run.** No problem — reopen the same research file. Completed stages are saved locally and the run resumes at its next stage.
 
 ## Safety rules for researchers
 
-- Do not include API keys, passwords, private correspondence, unpublished sensitive data, or personal information in problem statements or sources.
-- Treat every generated proof as a proposal requiring mathematical review.
-- Inspect warnings and unresolved questions before citing any result.
-- Reproduce computational evidence from the recorded bounds and algorithm version.
-- Verify bibliographic metadata against the actual paper before publication.
-- Do not make novelty or publication claims solely from the dossier.
-
+- Don't put API keys, passwords, private correspondence, or personal information into problem statements or sources.
+- Treat every generated proof attempt as a proposal that still needs your mathematical review.
+- Read the warnings and open questions before citing any result elsewhere.
+- Reproduce computational evidence yourself from the recorded bounds and algorithm version before relying on it.
+- Verify bibliographic metadata against the actual paper before publishing anything.
+- Don't make novelty or priority claims based solely on this tool's output.
