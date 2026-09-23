@@ -5,6 +5,7 @@ export const projects = sqliteTable("projects", {
   field: text("field").notNull().default("combinatorics"), statement: text("statement").notNull(),
   definitionsJson: text("definitions_json").notNull().default("[]"), assumptionsJson: text("assumptions_json").notNull().default("[]"),
   knownResultsJson: text("known_results_json").notNull().default("[]"), boundsJson: text("bounds_json").notNull().default("{}"),
+  mode: text("mode").notNull().default("prove"), existingProof: text("existing_proof"),
   userSourcesJson: text("user_sources_json").notNull().default("[]"), createdAt: integer("created_at").notNull(), updatedAt: integer("updated_at").notNull(),
 }, (table) => [index("idx_projects_owner_updated").on(table.ownerId, table.updatedAt)]);
 

@@ -7,11 +7,15 @@ export const verificationStatusSchema = z.enum(["source-supported", "computation
 
 function isPublicHttps(value:string){try{const url=new URL(value);if(url.protocol!=="https:")return false;const host=url.hostname.toLowerCase();if(host==="localhost"||host.endsWith(".local")||host==="::1")return false;if(/^127\./.test(host)||/^10\./.test(host)||/^192\.168\./.test(host))return false;const match=host.match(/^172\.(\d+)\./);if(match&&Number(match[1])>=16&&Number(match[1])<=31)return false;return true}catch{return false}}
 
+export const COMBINATORICS_FIELD_PATTERN = /\b(combinatorics|graph)\b/i;
+
 export const problemSpecSchema = z.object({
-  title: z.string().trim().min(3).max(160), field: z.literal("combinatorics").default("combinatorics"), statement: z.string().trim().min(10).max(12_000),
+  title: z.string().trim().min(3).max(160), field: z.string().trim().min(2).max(60).default("combinatorics"), statement: z.string().trim().min(10).max(12_000),
   definitions: z.array(z.string().trim().min(1).max(1_000)).max(30).default([]), assumptions: z.array(z.string().trim().min(1).max(1_000)).max(30).default([]),
   knownResults: z.array(z.string().trim().min(1).max(2_000)).max(30).default([]),
-  bounds: z.object({ minVertices: z.number().int().min(1).max(12).default(1), maxVertices: z.number().int().min(1).max(12).default(7) }).refine((v) => v.maxVertices >= v.minVertices, "Invalid bounds"),
+  bounds: z.object({ minVertices: z.number().int().min(1).max(12).default(1), maxVertices: z.number().int().min(1).max(12).default(7) }).refine((v) => v.maxVertices >= v.minVertices, "Invalid bounds").optional(),
+  mode: z.enum(["prove", "expand"]).default("prove"),
+  existingProof: z.string().trim().max(20_000).optional(),
   userSources: z.array(z.object({ title: z.string().min(1).max(300), url: z.string().url().refine(isPublicHttps, "A public HTTPS URL is required"), abstract: z.string().max(8_000).optional() })).max(20).default([]),
 });
 export type ProblemSpec = z.infer<typeof problemSpecSchema>;

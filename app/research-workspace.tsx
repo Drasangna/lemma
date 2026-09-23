@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { BUILT_IN_PROFILES } from "@/lib/run-profiles";
+import { COMBINATORICS_FIELD_PATTERN } from "@/lib/research-types";
 import type { ModelRef, ProblemSpec, RunProfile, StageOutput } from "@/lib/research-types";
 import { WebMcpRegistration } from "./webmcp";
 
@@ -34,7 +35,7 @@ const sample: ProblemSpec & { id?: string } = {
   statement: "If G is a triangle-free graph on n vertices, then e(G) ≤ floor(n² / 4).",
   definitions: ["G is a finite simple graph.", "A graph is triangle-free when it has no 3-cycle."],
   assumptions: ["n is a positive integer."], knownResults: ["Balanced complete bipartite graphs attain the proposed bound."],
-  bounds: { minVertices: 1, maxVertices: 6 }, userSources: [],
+  bounds: { minVertices: 1, maxVertices: 6 }, mode: "prove", userSources: [],
 };
 
 type Project = ProblemSpec & { id: string; createdAt?: number; updatedAt?: number };
@@ -109,14 +110,15 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
   async function saveProject() {
     setBusy(true); setNotice(null);
     try {
+      const payload = COMBINATORICS_FIELD_PATTERN.test(draft.field) ? draft : { ...draft, bounds: undefined };
       const result = project.id
-        ? await api<{ project: Project }>(`/api/projects/${project.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) })
-        : await api<{ project: Project }>("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key("project") }, body: JSON.stringify(draft) });
+        ? await api<{ project: Project }>(`/api/projects/${project.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        : await api<{ project: Project }>("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key("project") }, body: JSON.stringify(payload) });
       setProject(result.project); setDraft(result.project); setProjects((old) => [result.project, ...old.filter((p) => p.id !== result.project.id)]); setNotice("Problem specification saved.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not save the problem."); }
     finally { setBusy(false); }
   }
-  function newProject() { const blank = { ...sample, title: "Untitled combinatorics problem", statement: "State the mathematical problem to investigate." }; setProject({ ...blank, id: undefined }); setDraft(blank); setBundle(null); setTab("problem"); }
+  function newProject() { const blank = { ...sample, title: "Untitled research problem", statement: "State the mathematical problem to investigate." }; setProject({ ...blank, id: undefined }); setDraft(blank); setBundle(null); setTab("problem"); }
   async function selectProject(next: Project) {
     setProject(next); setDraft(next); setBundle(null); setNotice(null);
     const listing = await api<{ runs: Array<{ id: string; projectId: string }> }>("/api/projects");
@@ -216,8 +218,8 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
         </aside>
 
         <section className="research-main">
-          <div className="problem-heading"><div><p className="eyebrow">PRIVATE FILE · COMBINATORICS</p><h1>{project.title}</h1></div><Button variant="ghost" size="icon" aria-label="Project actions"><MoreHorizontal /></Button></div>
-          <div className="formula-card"><div className="formula-index">RESEARCH STATEMENT</div><p className="formula-text">{project.statement}</p>{project.title.toLowerCase().includes("triangle") && <MathFormula expression={String.raw`e(G) \le \left\lfloor n^2/4 \right\rfloor`} />}<div className="formula-meta"><Badge variant="outline">Researcher supplied</Badge><span>Definitions {project.definitions.length}</span><span>Assumptions {project.assumptions.length}</span><span>Bounds n ≤ {project.bounds.maxVertices}</span></div></div>
+          <div className="problem-heading"><div><p className="eyebrow">PRIVATE FILE · {project.field.toUpperCase()}</p><h1>{project.title}</h1></div><Button variant="ghost" size="icon" aria-label="Project actions"><MoreHorizontal /></Button></div>
+          <div className="formula-card"><div className="formula-index">RESEARCH STATEMENT</div><p className="formula-text">{project.statement}</p>{project.title.toLowerCase().includes("triangle") && <MathFormula expression={String.raw`e(G) \le \left\lfloor n^2/4 \right\rfloor`} />}<div className="formula-meta"><Badge variant="outline">Researcher supplied</Badge><span>Definitions {project.definitions.length}</span><span>Assumptions {project.assumptions.length}</span>{project.bounds && <span>Bounds n ≤ {project.bounds.maxVertices}</span>}</div></div>
 
           {notice && <div className="notice-banner" role="status"><AlertTriangle /> <span>{notice}</span></div>}
           <Tabs value={tab} onValueChange={setTab} className="research-tabs">
@@ -241,7 +243,7 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
               })}</div>
               <div className="evidence-grid">
                 <article className="evidence-card"><div className="card-icon"><Library /></div><div className="card-heading"><span>Literature scout</span><Badge className="badge-source">SOURCE-SUPPORTED</Badge></div><h3>{evidenceResult?.output?.artifacts.find((a) => a.type === "source")?.title ?? "Crossref and arXiv metadata search"}</h3><p>{evidenceResult?.output?.summary ?? "The evidence stage searches cached public metadata before asking a model to interpret the results."}</p><div className="source-row"><BookOpen /><span><strong>Metadata-only research</strong><small>HTTPS sources · deduplicated · maximum 12</small></span><ChevronRight /></div></article>
-                <article className="evidence-card"><div className="card-icon"><FlaskConical /></div><div className="card-heading"><span>Experiment engine</span><Badge className="badge-compute">COMPUTATION-SUPPORTED</Badge></div><h3>{evidenceResult ? "Bounded deterministic experiment recorded" : `Ready to enumerate through n = ${project.bounds.maxVertices}`}</h3><p>No generated code is executed. The reproducible graph kernel records its algorithm version, parameters, witness, and result.</p><div className="metric-strip"><span><strong>1</strong> batch maximum</span><span><strong>0</strong> arbitrary scripts</span><span><strong>v1</strong> kernel</span></div></article>
+                <article className="evidence-card"><div className="card-icon"><FlaskConical /></div><div className="card-heading"><span>Experiment engine</span><Badge className="badge-compute">COMPUTATION-SUPPORTED</Badge></div><h3>{evidenceResult ? "Bounded deterministic experiment recorded" : project.bounds ? `Ready to enumerate through n = ${project.bounds.maxVertices}` : "No bounded computation kernel registered for this field"}</h3><p>No generated code is executed. The reproducible graph kernel records its algorithm version, parameters, witness, and result.</p><div className="metric-strip"><span><strong>1</strong> batch maximum</span><span><strong>0</strong> arbitrary scripts</span><span><strong>v1</strong> kernel</span></div></article>
               </div>
             </TabsContent>
 
@@ -254,11 +256,13 @@ export function ResearchWorkspace({ user }: { user: { displayName: string; email
 
             <TabsContent value="problem" className="editor-panel">
               <div className="panel-heading"><div><p className="section-kicker">STRUCTURED INPUT</p><h2>Problem specification</h2></div><Button onClick={saveProject} disabled={busy}>{project.id ? "Save changes" : "Create research file"}</Button></div>
-              <label>Title<Input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
+              <div className="form-grid"><label>Title<Input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label><label>Field<Input value={draft.field} onChange={(e) => setDraft({ ...draft, field: e.target.value })} placeholder="e.g. combinatorics, number theory, analysis" /></label></div>
+              <label>Mode<Select value={draft.mode} onValueChange={(mode: ProblemSpec["mode"]) => setDraft({ ...draft, mode })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="prove">Prove from scratch</SelectItem><SelectItem value="expand">Expand an existing proof</SelectItem></SelectContent></Select></label>
               <label>Statement<Textarea rows={6} value={draft.statement} onChange={(e) => setDraft({ ...draft, statement: e.target.value })} /></label>
               <div className="form-grid"><label>Definitions, one per line<Textarea rows={5} value={draft.definitions.join("\n")} onChange={(e) => setDraft({ ...draft, definitions: splitLines(e.target.value) })} /></label><label>Assumptions, one per line<Textarea rows={5} value={draft.assumptions.join("\n")} onChange={(e) => setDraft({ ...draft, assumptions: splitLines(e.target.value) })} /></label></div>
               <label>Known results, one per line<Textarea rows={4} value={draft.knownResults.join("\n")} onChange={(e) => setDraft({ ...draft, knownResults: splitLines(e.target.value) })} /></label>
-              <div className="bounds-row"><label>Minimum vertices<Input type="number" min={1} max={12} value={draft.bounds.minVertices} onChange={(e) => setDraft({ ...draft, bounds: { ...draft.bounds, minVertices: Number(e.target.value) } })} /></label><label>Maximum vertices<Input type="number" min={1} max={12} value={draft.bounds.maxVertices} onChange={(e) => setDraft({ ...draft, bounds: { ...draft.bounds, maxVertices: Number(e.target.value) } })} /></label></div>
+              {draft.mode === "expand" && <label>Existing proof<Textarea rows={8} value={draft.existingProof ?? ""} onChange={(e) => setDraft({ ...draft, existingProof: e.target.value })} placeholder="Paste the proof or argument you already have. Lemma will find sources for it and propose generalizations." /></label>}
+              {COMBINATORICS_FIELD_PATTERN.test(draft.field) && <div className="bounds-row"><label>Minimum vertices<Input type="number" min={1} max={12} value={draft.bounds?.minVertices ?? 1} onChange={(e) => setDraft({ ...draft, bounds: { minVertices: Number(e.target.value), maxVertices: draft.bounds?.maxVertices ?? 7 } })} /></label><label>Maximum vertices<Input type="number" min={1} max={12} value={draft.bounds?.maxVertices ?? 7} onChange={(e) => setDraft({ ...draft, bounds: { minVertices: draft.bounds?.minVertices ?? 1, maxVertices: Number(e.target.value) } })} /></label></div>}
               <div className="source-editor"><p className="section-kicker">OPTIONAL USER SOURCE</p><div className="form-grid"><label>Source title<Input value={draft.userSources[0]?.title ?? ""} onChange={(e) => setDraft({ ...draft, userSources: [{ title: e.target.value, url: draft.userSources[0]?.url ?? "https://", abstract: draft.userSources[0]?.abstract }] })} /></label><label>HTTPS URL<Input type="url" value={draft.userSources[0]?.url ?? ""} placeholder="https://…" onChange={(e) => setDraft({ ...draft, userSources: [{ title: draft.userSources[0]?.title ?? "Researcher-supplied source", url: e.target.value, abstract: draft.userSources[0]?.abstract }] })} /></label></div><label>Abstract or citation note<Textarea rows={3} value={draft.userSources[0]?.abstract ?? ""} onChange={(e) => setDraft({ ...draft, userSources: [{ title: draft.userSources[0]?.title ?? "Researcher-supplied source", url: draft.userSources[0]?.url ?? "https://", abstract: e.target.value }] })} /></label>{draft.userSources.length > 0 && <Button variant="ghost" size="sm" onClick={() => setDraft({ ...draft, userSources: [] })}>Remove source</Button>}</div>
             </TabsContent>
 
