@@ -1,5 +1,7 @@
 # Axiom implementation handoff
 
+> **Historical document.** Sections below describe milestone one as it was built (file names such as `lib/providers/openai.ts` no longer exist). For the *current* map of the code read [`CONTRIBUTING.md`](CONTRIBUTING.md), and see the Milestone 2 and 3 addenda at the bottom for what changed since.
+
 This document is the complete technical handoff for another coding agent or developer. Read this file, `HOW_TO_USE.md`, and the current source before making changes. Preserve the provider-neutral contracts, claim-label rules, owner checks, idempotency requirements, and the rule against automatic paid retries or cross-provider fallback.
 
 ## Current result
@@ -315,4 +317,29 @@ Everything above this section describes milestone one as originally built and is
 3. **Removed Cloudflare D1, Sites hosting, and Sign-in-with-ChatGPT.** This explicitly and deliberately overrides two invariants stated earlier in this document — "hosted sign-in must not be reimplemented" and "keep the Site private unless the owner explicitly requests an audience change" — because there is no more hosted Site to keep private. `app/chatgpt-auth.ts` now returns a fixed local identity (`local-owner`) unconditionally; persistence moved from D1 to a local SQLite file via `better-sqlite3` (`db/index.ts`, path configurable via `LEMMA_DB_PATH`, migrate with `npm run db:migrate`); the app runs via `vinext dev`/`build`/`start` targeting plain Node (`vite.config.ts` regenerated with `vinext init --platform=node`) instead of Cloudflare Workers. Every other invariant — idempotency keys, owner-scoped reads (now scoped to the single local user), stage-before-advance persistence, the five-claim-state policy, deep-pass isolation, no arbitrary code execution or arbitrary URL fetching — is unchanged, just re-scoped from "the ChatGPT-authenticated owner" to "the one local user."
 
 The UI's visual styling was also flattened (dropped serif branding, a spinning stage-ring, a glow effect, and a fake circular-progress border trick) — cosmetic only, no invariant affected.
+
+## Milestone 3 addendum: simplification and contributor readability
+
+The sections above describe milestones one and two as built; file names in them (for example `lib/providers/openai.ts`, `lib/providers/shared.ts`, `app/chatgpt-auth.ts`, `lib/api-helpers.ts`, `scripts/migrate.mjs`) no longer exist. **The current map of the code is in `CONTRIBUTING.md`.** Milestone three restructured the code without changing what the product promises:
+
+- **One place per idea.** The stage list and the claim/artifact/status vocabularies are defined once in `lib/research-types.ts` (previously repeated in the Zod schema, the hand-written JSON schema sent to models, the prompt text, and three UI copies); a test fails if the Zod schema and the model-facing JSON schema drift.
+- **API routes** are built from `route()` and `idempotent()` in `lib/http.ts` (previously ten hand-copied try/catch/auth/idempotency blocks). All database access moved into `lib/repository.ts`.
+- **The orchestrator** is small named steps. Each stage's result, its claims, and the run's counters are saved in **one database transaction**, so "stage saved" and "run advanced" cannot diverge; token counters are atomic increments.
+- **The claim policy** is the pure module `lib/claim-verification.ts`.
+- **The UI** is `components/workspace/` (one state hook and one file per tab) instead of a single component. Model names, profile lists and deep-pass buttons all come from `lib/models.ts` and the server.
+- **Zero-step database.** The SQLite file creates and migrates itself on first use; the `db:migrate` script is gone.
+- **Dependencies:** removed 14 unused packages, 54 unused vendored UI components, and the real `next` package (vinext supplies the Next-compatible API), plus `eslint-config-next` (ESLint now uses an explicit `typescript-eslint` + React-hooks config). `node_modules` went from 772 MB to about 330 MB.
+- **Speculative code removed:** the provider interface's unused tool-continuation method, capability flags and raw tool-call fields; the fake "Search" and "Project actions" buttons.
+
+Behavior that intentionally changed (all covered by tests in `tests/api-flow.test.ts`):
+
+1. **Model-authored artifacts no longer count as evidence.** Previously an artifact of type `source` emitted by a model in one stage could make a later claim citing its id verify as `source-supported`, contradicting the claim policy. Evidence ids now come only from tool records Lemma itself saved.
+2. **The graph kernel declines statements it cannot check** (returns nothing) instead of always running the triangle-free enumeration; the Petersen result is computed rather than asserted.
+3. **Validation errors are a readable HTTP 400** (they were a 500 with a raw Zod dump); malformed JSON is a 400.
+4. **Deep passes store `attempt: 1`** (they stored `Date.now()`, which corrupted the attempt number of the next normal retry of that stage).
+5. **Literature search reports failure when both Crossref and arXiv are unreachable** (it used to look like "no papers exist") and every outbound request has a timeout.
+6. `GET /api/projects` returns only `id`, `projectId`, `status`, `updatedAt` per run, and `GET /api/providers` returns `{ provider, configured, models }`.
+7. Creating a profile is now idempotent.
+
+Observation for a future milestone: the `claims` and `evidence` tables are written but never read (the audit UI reads `stage_results.output_json`). They are kept so the schema and existing databases do not change; drop them or start querying them.
 
