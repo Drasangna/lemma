@@ -1,8 +1,8 @@
 # Lemma
 
-**A private, local research workspace for auditable, AI-assisted combinatorics.**
+**A private, local research workspace for auditable, AI-assisted mathematics.**
 
-Lemma runs a structured, six-stage investigation over a combinatorics problem — normalize, gather evidence, propose lemmas, attempt proofs, critique, synthesize — and persists every stage before the next begins. Every claim a model makes is checked against recorded evidence and labeled with one of five honest verification states. There is no `proved` label, on purpose: agreement between models is not proof, and a bounded computation is not a general argument. Lemma's job is to keep the paper trail, not to pretend it did the mathematics for you.
+Lemma runs a structured, six-stage investigation over a problem in any mathematical field — normalize, gather evidence, propose lemmas, attempt proofs, critique, synthesize — and persists every stage before the next begins. It supports two modes: proving an open conjecture from scratch, or handing it an existing proof to find supporting sources for and expand upon (generalizations, corollaries, related work). Every claim a model makes is checked against recorded evidence and labeled with one of five honest verification states. There is no `proved` label, on purpose: agreement between models is not proof, and a bounded computation is not a general argument. Lemma's job is to keep the paper trail, not to pretend it did the mathematics for you.
 
 It's a single-user app that runs entirely on your own machine.
 

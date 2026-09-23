@@ -15,6 +15,13 @@
       "when": 1789443255507,
       "tag": "0001_adorable_mordo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790136234389,
+      "tag": "0002_ambiguous_nightcrawler",
+      "breakpoints": true
     }
   ]
 }

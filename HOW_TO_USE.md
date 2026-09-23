@@ -1,6 +1,6 @@
 # How to use Lemma
 
-Lemma helps a mathematician organize an AI-assisted combinatorics investigation without ever presenting model agreement as proof. It records every stage, model, tool result, token count, warning, and unresolved gap — so you can trust the parts that are checked and stay skeptical of the parts that aren't.
+Lemma helps a mathematician organize an AI-assisted investigation — in any field, from combinatorics to analysis to number theory — without ever presenting model agreement as proof. It records every stage, model, tool result, token count, warning, and unresolved gap — so you can trust the parts that are checked and stay skeptical of the parts that aren't.
 
 This guide assumes no software background. If you can open a terminal and copy-paste a command, you can run this.
 
@@ -64,12 +64,15 @@ To stop the app later, go back to the terminal and press `Ctrl+C`. To use it aga
 1. Press the plus button next to **Research files**.
 2. Open the **Problem specification** tab.
 3. Enter a clear title and the mathematical statement you're investigating.
-4. Enter definitions, one per line.
-5. Enter assumptions, one per line.
-6. Enter known results, one per line — distinguish facts you know from results you merely suspect.
-7. Set the minimum and maximum vertex bounds. The built-in computation engine can exhaustively check small graphs (the triangle-free benchmark below works through 6 vertices).
-8. Optionally add a citation title, a public `https://` URL, and a pasted abstract or note.
-9. Select **Create research file**.
+4. Enter the **Field** — any area of mathematics (e.g. "combinatorics," "number theory," "analysis"). This is descriptive text, not a fixed list.
+5. Choose a **Mode**: **Prove from scratch** if you're starting from an open conjecture, or **Expand an existing proof** if you already have a proof and want Lemma to find supporting sources and propose generalizations or corollaries.
+6. Enter definitions, one per line.
+7. Enter assumptions, one per line.
+8. Enter known results, one per line — distinguish facts you know from results you merely suspect.
+9. In **Expand an existing proof** mode, paste your existing proof or argument into the **Existing proof** field that appears — Lemma treats this as given context, not something to re-derive.
+10. If your field is combinatorics or graph theory, set the minimum and maximum vertex bounds — the built-in computation engine can exhaustively check small graphs (the triangle-free benchmark below works through 6 vertices). This step only appears for combinatorics/graph-flavored fields; other fields rely on literature search alone for now.
+11. Optionally add a citation title, a public `https://` URL, and a pasted abstract or note.
+12. Select **Create research file**.
 
 Private-network, local, and non-HTTPS source URLs are rejected. A citation you paste in yourself is not automatically treated as verified — see the labels below.
 
@@ -101,12 +104,12 @@ You then have two choices:
 - **Advance one stage** runs only the next stage, so you can review each result before continuing.
 - **Run remaining** proceeds through the rest of the stages automatically, one persisted request at a time.
 
-The six stages are:
+The six stages are the same in both modes, but what each stage is asked to do adapts to your chosen **Mode**:
 
 1. Problem normalization.
 2. Literature metadata and bounded computation.
-3. Candidate lemmas and conjecture refinements.
-4. Two independent proof strategies.
+3. In **Prove from scratch** mode: candidate lemmas toward a proof. In **Expand an existing proof** mode: generalizations, corollaries, and related conjectures suggested by your supplied proof.
+4. In **Prove from scratch** mode: two independent proof strategies for the original statement. In **Expand an existing proof** mode: attempts at the identified generalizations/corollaries, and/or gaps found in your supplied proof.
 5. Adversarial critique and counterexample search.
 6. Dossier synthesis.
 
