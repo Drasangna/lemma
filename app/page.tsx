@@ -1,9 +1,9 @@
+import { getLocalUser } from "@/lib/local-user";
 import { ResearchWorkspace } from "./research-workspace";
-import { getChatGPTUser } from "./chatgpt-auth";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
-  const user = await getChatGPTUser();
-  return <ResearchWorkspace user={{ displayName: user.displayName, email: user.email }} />;
+export default function Home() {
+  const { displayName, email } = getLocalUser();
+  return <ResearchWorkspace user={{ displayName, email }} />;
 }

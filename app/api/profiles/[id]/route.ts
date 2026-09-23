@@ -1,9 +1,18 @@
-import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { runProfiles } from "@/db/schema";
-import { ApiError, errorResponse, requireApiUser, requireIdempotencyKey } from "@/lib/api-helpers";
+import { idempotent, parseBody, route } from "@/lib/http";
 import { runProfileInputSchema } from "@/lib/research-types";
+import { deleteProfile, updateProfile } from "@/lib/repository";
 
-type Context={params:Promise<{id:string}>};
-export async function PATCH(request:Request,{params}:Context){try{const user=await requireApiUser();requireIdempotencyKey(request);const {id}=await params;const profile=runProfileInputSchema.parse(await request.json());const stored={...profile,id};const [row]=await getDb().update(runProfiles).set({name:profile.name,configJson:JSON.stringify(stored),updatedAt:Date.now()}).where(and(eq(runProfiles.id,id),eq(runProfiles.ownerId,user.userId),eq(runProfiles.builtIn,false))).returning();if(!row)throw new ApiError(404,"Saved profile not found.");return Response.json({profile:stored})}catch(error){return errorResponse(error)}}
-export async function DELETE(_:Request,{params}:Context){try{const user=await requireApiUser();const {id}=await params;await getDb().delete(runProfiles).where(and(eq(runProfiles.id,id),eq(runProfiles.ownerId,user.userId),eq(runProfiles.builtIn,false)));return new Response(null,{status:204})}catch(error){return errorResponse(error)}}
+export const PATCH = route((context) =>
+  idempotent(context, `update-profile:${context.id}`, async () => ({
+    profile: updateProfile(
+      context.user.userId,
+      context.id,
+      await parseBody(context.request, runProfileInputSchema),
+    ),
+  })),
+);
+
+export const DELETE = route(async ({ user, id }) => {
+  deleteProfile(user.userId, id);
+  return null;
+});

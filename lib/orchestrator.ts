@@ -1,32 +1,316 @@
-import { and, asc, desc, eq, gt } from "drizzle-orm";
+/**
+ * Runs the research pipeline one stage at a time.
+ *
+ * Invariants (see IMPLEMENTATION_HANDOFF.md): a stage is validated and saved before the run
+ * advances; nothing is ever retried or rerouted automatically; a failed attempt is kept.
+ */
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { claims, evidence, literatureCache, researchRuns, stageResults } from "@/db/schema";
-import { ApiError, parseJson } from "./api-helpers";
+import { claims, evidence, researchRuns, stageResults } from "@/db/schema";
+import { collectEvidenceIds, verifyClaims, type ToolRecord } from "./claim-verification";
+import { ApiError, parseJson } from "./http";
 import { getProvider, ProviderError, type ProviderResponse } from "./providers";
-import type { ModelRef, ProblemSpec, RunProfile, StageId, StageOutput } from "./research-types";
-import { stageIds } from "./research-types";
 import { getOwnedProject, getOwnedRun, serializeProject } from "./repository";
+import { stageIds, type ModelRef, type RunProfile, type StageId, type StageOutput } from "./research-types";
 import { stageInput, stageInstructions } from "./stage-prompts";
-import { applicableKernels } from "./tools/registry";
-import { searchLiterature } from "./tools/literature";
+import { runStageTools } from "./tools";
 
-const PROMPT_VERSION="lemma-v1";
-async function collectContext(runId:string){const rows=await getDb().select().from(stageResults).where(and(eq(stageResults.runId,runId),eq(stageResults.status,"completed"))).orderBy(asc(stageResults.createdAt));return rows.filter((r)=>!r.isDeepPass&&r.outputJson).map((r)=>({stage:r.stage,output:parseJson<StageOutput>(r.outputJson!,{summary:"",claims:[],artifacts:[],openQuestions:[],suggestedNextSteps:[]})}))}
-async function cachedLiterature(problem:ProblemSpec){const query=`${problem.title} ${problem.statement.slice(0,400)}`,queryKey=query.toLowerCase().replace(/\s+/g," ").trim();const [cached]=await getDb().select().from(literatureCache).where(and(eq(literatureCache.queryKey,queryKey),gt(literatureCache.expiresAt,Date.now()))).limit(1);if(cached)return parseJson(cached.resultsJson,[]);const results=await searchLiterature(query,process.env.CROSSREF_MAILTO,12);const now=Date.now();await getDb().insert(literatureCache).values({id:crypto.randomUUID(),queryKey,resultsJson:JSON.stringify(results),createdAt:now,expiresAt:now+7*24*60*60*1000}).onConflictDoUpdate({target:literatureCache.queryKey,set:{resultsJson:JSON.stringify(results),createdAt:now,expiresAt:now+7*24*60*60*1000}});return results}
-async function stageTools(stage:StageId,problem:ProblemSpec){if(stage!=="evidence")return[];const kernels=applicableKernels(problem);const [literature,...experiments]=await Promise.all([cachedLiterature(problem).catch((error)=>({error:error instanceof Error?error.message:"Literature search failed"})),...kernels.map((k)=>Promise.resolve(k.run(problem)))]);return[{name:"search_literature",output:literature},...kernels.map((k,i)=>({name:k.id,output:experiments[i]}))]}
-async function normalizeClaimSupport(runId:string,output:StageOutput,tools:unknown[]):Promise<StageOutput>{const sourceIds=new Set<string>(),computationIds=new Set<string>();for(const record of tools as Array<{name?:string;output?:unknown}>){if(record.name==="search_literature"&&Array.isArray(record.output)){for(const item of record.output as Array<{id?:unknown}>)if(typeof item.id==="string")sourceIds.add(item.id);continue}if(record.output&&typeof record.output==="object"&&"id" in record.output&&typeof (record.output as {id:unknown}).id==="string")computationIds.add(String((record.output as {id:unknown}).id))}const prior=await getDb().select({outputJson:stageResults.outputJson}).from(stageResults).where(eq(stageResults.runId,runId));for(const row of prior){if(!row.outputJson)continue;const parsed=parseJson<StageOutput|null>(row.outputJson,null);for(const artifact of parsed?.artifacts??[]){if(artifact.type==="source")sourceIds.add(artifact.id);if(artifact.type==="computation"||artifact.type==="counterexample")computationIds.add(artifact.id)}}return{...output,claims:output.claims.map((claim)=>{const valid=claim.verificationStatus==="source-supported"?claim.evidenceRefs.some((id)=>sourceIds.has(id)):claim.verificationStatus==="computation-supported"?claim.evidenceRefs.some((id)=>computationIds.has(id)):true;if(valid)return claim;return{...claim,verificationStatus:"unverified" as const,warnings:[...claim.warnings,"Downgraded by Lemma: the claimed support did not reference a recorded source or computation."]}})}}
-async function persistResult(runId:string,stage:StageId,attempt:number,ref:ModelRef,result:ProviderResponse,tools:unknown[],isDeepPass=false){
-  const db=getDb(),stageResultId=crypto.randomUUID(),createdAt=Date.now(),output=await normalizeClaimSupport(runId,result.output,tools);await db.insert(stageResults).values({id:stageResultId,runId,stage,attempt,provider:"openrouter",requestedModel:ref.model,returnedModel:result.returnedModel,reasoning:ref.reasoning,maxOutputTokens:ref.maxOutputTokens,status:"completed",outputJson:JSON.stringify(output),providerResponseId:result.providerResponseId,usageJson:JSON.stringify(result.usage),toolRecordsJson:JSON.stringify(tools),promptVersion:PROMPT_VERSION,isDeepPass,createdAt});
-  for(const claim of output.claims){const claimId=crypto.randomUUID();await db.insert(claims).values({id:claimId,runId,stageResultId,text:claim.text,kind:claim.kind,verificationStatus:claim.verificationStatus,warningsJson:JSON.stringify(claim.warnings)});for(const refId of claim.evidenceRefs)await db.insert(evidence).values({id:crypto.randomUUID(),runId,stageResultId,claimId,type:"reference",label:refId,metadataJson:"{}"})}
-  for(const artifact of output.artifacts)await db.insert(evidence).values({id:crypto.randomUUID(),runId,stageResultId,claimId:null,type:artifact.type,label:artifact.title,metadataJson:JSON.stringify({artifactId:artifact.id,...artifact.metadata})});return{stageResultId,result:{...result,output}};
+const PROMPT_VERSION = "lemma-v1";
+const PROVIDER_ID = "openrouter";
+const MAX_DEEP_PASS_TOKENS = 5000;
+
+// ---------------------------------------------------------------------------------------
+// Reading history
+// ---------------------------------------------------------------------------------------
+
+type StageRow = typeof stageResults.$inferSelect;
+
+/** Completed, non-deep results in order: this is the context every later stage receives. */
+function priorResults(rows: StageRow[]) {
+  return rows
+    .filter((row) => row.status === "completed" && !row.isDeepPass && row.outputJson)
+    .map((row) => ({ stage: row.stage, output: parseJson<StageOutput>(row.outputJson!, {} as StageOutput) }));
 }
-export async function advanceRun(ownerId:string,runId:string,override?:Partial<ModelRef>){
-  const run=await getOwnedRun(ownerId,runId);if(run.cancelRequested||run.status==="cancelled")throw new ApiError(409,"This run has been cancelled.");if(run.status==="completed")throw new ApiError(409,"This run is already complete.");
-  const stage=stageIds[run.currentStage];if(!stage)throw new ApiError(409,"No remaining stage.");const profile=parseJson<RunProfile>(run.profileSnapshotJson,{} as RunProfile);const ref={...profile.stages[stage],...override} as ModelRef;if(!ref?.model)throw new ApiError(400,"The selected profile has no model for this stage.");
-  if(run.outputTokens+ref.maxOutputTokens>profile.totalOutputLimit)throw new ApiError(409,"The run output limit would be exceeded. Increase the saved profile limit explicitly to continue.");
-  const project=serializeProject(await getOwnedProject(ownerId,run.projectId));const prior=await collectContext(runId);const tools=await stageTools(stage,project);const [latest]=await getDb().select().from(stageResults).where(and(eq(stageResults.runId,runId),eq(stageResults.stage,stage))).orderBy(desc(stageResults.createdAt)).limit(1);const attempt=(latest?.attempt??0)+1;
-  await getDb().update(researchRuns).set({status:"running",updatedAt:Date.now()}).where(eq(researchRuns.id,runId));
-  try{const adapter=getProvider();const result=await adapter.generateStructured({model:ref.model,reasoning:ref.reasoning,maxOutputTokens:ref.maxOutputTokens,instructions:stageInstructions(stage,project.mode),input:stageInput(stage,project,prior,tools)});const saved=await persistResult(runId,stage,attempt,ref,result,tools);const fresh=await getOwnedRun(ownerId,runId);const next=run.currentStage+1;const status=fresh.cancelRequested?"cancelled":next>=stageIds.length?"completed":"paused";await getDb().update(researchRuns).set({status,currentStage:next,inputTokens:fresh.inputTokens+result.usage.inputTokens,outputTokens:fresh.outputTokens+result.usage.outputTokens,reasoningTokens:fresh.reasoningTokens+result.usage.reasoningTokens,cachedTokens:fresh.cachedTokens+result.usage.cachedTokens,updatedAt:Date.now()}).where(eq(researchRuns.id,runId));return{stage,status,...saved};}
-  catch(error){const detail=error instanceof ProviderError?{provider:error.provider,code:error.code,message:error.message,retryable:error.retryable}:{code:"unexpected",message:error instanceof Error?error.message:"Unexpected stage failure",retryable:false};await getDb().insert(stageResults).values({id:crypto.randomUUID(),runId,stage,attempt,provider:"openrouter",requestedModel:ref.model,reasoning:ref.reasoning,maxOutputTokens:ref.maxOutputTokens,status:"failed",usageJson:"{}",toolRecordsJson:JSON.stringify(tools),errorJson:JSON.stringify(detail),promptVersion:PROMPT_VERSION,isDeepPass:false,createdAt:Date.now()});await getDb().update(researchRuns).set({status:"failed",updatedAt:Date.now()}).where(eq(researchRuns.id,runId));throw new ApiError(error instanceof ProviderError?error.status:500,detail.message,detail)}
+
+/** Evidence ids from every tool run so far in this run (recorded by Lemma, never by a model). */
+function recordedToolEvidence(rows: StageRow[], current: ToolRecord[]) {
+  const earlier = rows.flatMap((row) => parseJson<ToolRecord[]>(row.toolRecordsJson, []));
+  return collectEvidenceIds([...earlier, ...current]);
 }
-export async function deepenStage(ownerId:string,runId:string,stage:StageId,ref:ModelRef){if(stage!=="proofs"&&stage!=="critique")throw new ApiError(400,"Only proof and critique stages can receive a deep pass.");if(ref.maxOutputTokens>5000)throw new ApiError(400,"Deep passes are limited to 5,000 output tokens.");const run=await getOwnedRun(ownerId,runId);const project=serializeProject(await getOwnedProject(ownerId,run.projectId));const prior=await collectContext(runId);const tools=await stageTools(stage,project);try{const result=await getProvider().generateStructured({model:ref.model,reasoning:ref.reasoning,maxOutputTokens:ref.maxOutputTokens,instructions:`${stageInstructions(stage,project.mode)}\nThis is a manually approved deep pass. Critically improve the earlier result without hiding it.`,input:stageInput(stage,project,prior,tools)});const saved=await persistResult(runId,stage,Date.now(),ref,result,tools,true);const fresh=await getOwnedRun(ownerId,runId);await getDb().update(researchRuns).set({inputTokens:fresh.inputTokens+result.usage.inputTokens,outputTokens:fresh.outputTokens+result.usage.outputTokens,reasoningTokens:fresh.reasoningTokens+result.usage.reasoningTokens,cachedTokens:fresh.cachedTokens+result.usage.cachedTokens,updatedAt:Date.now()}).where(eq(researchRuns.id,runId));return saved}catch(error){if(error instanceof ProviderError)throw new ApiError(error.status,error.message,{provider:error.provider,code:error.code,retryable:error.retryable});throw error}}
+
+// ---------------------------------------------------------------------------------------
+// Writing results (each function is one atomic transaction)
+// ---------------------------------------------------------------------------------------
+
+type Usage = ProviderResponse["usage"];
+
+const usageIncrements = (usage: Usage) => ({
+  inputTokens: sql`${researchRuns.inputTokens} + ${usage.inputTokens}`,
+  outputTokens: sql`${researchRuns.outputTokens} + ${usage.outputTokens}`,
+  reasoningTokens: sql`${researchRuns.reasoningTokens} + ${usage.reasoningTokens}`,
+  cachedTokens: sql`${researchRuns.cachedTokens} + ${usage.cachedTokens}`,
+});
+
+type CompletedStage = {
+  runId: string;
+  stage: StageId;
+  attempt: number;
+  ref: ModelRef;
+  response: ProviderResponse;
+  output: StageOutput;
+  tools: ToolRecord[];
+  isDeepPass: boolean;
+  /** Set for normal stages: advance the run to this index and status. */
+  advanceTo?: { stageIndex: number };
+};
+
+function saveCompletedStage(stage: CompletedStage) {
+  return getDb().transaction((tx) => {
+    const stageResultId = crypto.randomUUID();
+    tx.insert(stageResults)
+      .values({
+        id: stageResultId,
+        runId: stage.runId,
+        stage: stage.stage,
+        attempt: stage.attempt,
+        provider: PROVIDER_ID,
+        requestedModel: stage.ref.model,
+        returnedModel: stage.response.returnedModel,
+        reasoning: stage.ref.reasoning,
+        maxOutputTokens: stage.ref.maxOutputTokens,
+        status: "completed",
+        outputJson: JSON.stringify(stage.output),
+        providerResponseId: stage.response.providerResponseId,
+        usageJson: JSON.stringify(stage.response.usage),
+        toolRecordsJson: JSON.stringify(stage.tools),
+        promptVersion: PROMPT_VERSION,
+        isDeepPass: stage.isDeepPass,
+        createdAt: Date.now(),
+      })
+      .run();
+
+    // Normalized copies of the claims and artifacts, for auditing.
+    const claimRows = stage.output.claims.map((claim) => ({ id: crypto.randomUUID(), claim }));
+    if (claimRows.length) {
+      tx.insert(claims)
+        .values(
+          claimRows.map(({ id, claim }) => ({
+            id,
+            runId: stage.runId,
+            stageResultId,
+            text: claim.text,
+            kind: claim.kind,
+            verificationStatus: claim.verificationStatus,
+            warningsJson: JSON.stringify(claim.warnings),
+          })),
+        )
+        .run();
+    }
+    const evidenceRows = [
+      ...claimRows.flatMap(({ id, claim }) =>
+        claim.evidenceRefs.map((ref) => ({ claimId: id, type: "reference", label: ref, metadataJson: "{}" })),
+      ),
+      ...stage.output.artifacts.map((artifact) => ({
+        claimId: null,
+        type: artifact.type,
+        label: artifact.title,
+        metadataJson: JSON.stringify({ artifactId: artifact.id, ...artifact.metadata }),
+      })),
+    ];
+    if (evidenceRows.length) {
+      tx.insert(evidence)
+        .values(
+          evidenceRows.map((row) => ({ id: crypto.randomUUID(), runId: stage.runId, stageResultId, ...row })),
+        )
+        .run();
+    }
+
+    // Update the run in the same transaction, so "stage saved" and "run advanced" cannot diverge.
+    const set = { ...usageIncrements(stage.response.usage), updatedAt: Date.now() };
+    if (!stage.advanceTo) {
+      tx.update(researchRuns).set(set).where(eq(researchRuns.id, stage.runId)).run();
+      return { stageResultId, status: undefined };
+    }
+    const cancelRequested = tx
+      .select({ v: researchRuns.cancelRequested })
+      .from(researchRuns)
+      .where(eq(researchRuns.id, stage.runId))
+      .get()?.v;
+    const status = cancelRequested
+      ? "cancelled"
+      : stage.advanceTo.stageIndex >= stageIds.length
+        ? "completed"
+        : "paused";
+    tx.update(researchRuns)
+      .set({ ...set, status, currentStage: stage.advanceTo.stageIndex })
+      .where(eq(researchRuns.id, stage.runId))
+      .run();
+    return { stageResultId, status };
+  });
+}
+
+function saveFailedStage(
+  runId: string,
+  stage: StageId,
+  attempt: number,
+  ref: ModelRef,
+  tools: ToolRecord[],
+  detail: object,
+) {
+  getDb().transaction((tx) => {
+    tx.insert(stageResults)
+      .values({
+        id: crypto.randomUUID(),
+        runId,
+        stage,
+        attempt,
+        provider: PROVIDER_ID,
+        requestedModel: ref.model,
+        reasoning: ref.reasoning,
+        maxOutputTokens: ref.maxOutputTokens,
+        status: "failed",
+        usageJson: "{}",
+        toolRecordsJson: JSON.stringify(tools),
+        errorJson: JSON.stringify(detail),
+        promptVersion: PROMPT_VERSION,
+        isDeepPass: false,
+        createdAt: Date.now(),
+      })
+      .run();
+    tx.update(researchRuns)
+      .set({ status: "failed", updatedAt: Date.now() })
+      .where(eq(researchRuns.id, runId))
+      .run();
+  });
+}
+
+// ---------------------------------------------------------------------------------------
+// Public operations
+// ---------------------------------------------------------------------------------------
+
+/** Runs the run's next stage. `override` lets the researcher explicitly pick a different model. */
+export async function advanceRun(ownerId: string, runId: string, override: Partial<ModelRef> = {}) {
+  const run = getOwnedRun(ownerId, runId);
+  if (run.cancelRequested || run.status === "cancelled")
+    throw new ApiError(409, "This run has been cancelled.");
+  if (run.status === "completed") throw new ApiError(409, "This run is already complete.");
+
+  const stage = stageIds[run.currentStage];
+  if (!stage) throw new ApiError(409, "No remaining stage.");
+
+  const profile = parseJson<RunProfile>(run.profileSnapshotJson, {} as RunProfile);
+  const ref = { ...profile.stages[stage], ...override } as ModelRef;
+  if (!ref.model) throw new ApiError(400, "The selected profile has no model for this stage.");
+  if (run.outputTokens + ref.maxOutputTokens > profile.totalOutputLimit) {
+    throw new ApiError(
+      409,
+      "The run output limit would be exceeded. Increase the saved profile limit explicitly to continue.",
+    );
+  }
+
+  const project = serializeProject(getOwnedProject(ownerId, run.projectId));
+  const history = getDb()
+    .select()
+    .from(stageResults)
+    .where(eq(stageResults.runId, runId))
+    .orderBy(stageResults.createdAt)
+    .all();
+  const attempt = 1 + history.filter((row) => row.stage === stage && !row.isDeepPass).length;
+
+  const tools = await runStageTools(stage, project);
+  getDb()
+    .update(researchRuns)
+    .set({ status: "running", updatedAt: Date.now() })
+    .where(eq(researchRuns.id, runId))
+    .run();
+
+  try {
+    const response = await getProvider().generateStructured({
+      model: ref.model,
+      reasoning: ref.reasoning,
+      maxOutputTokens: ref.maxOutputTokens,
+      instructions: stageInstructions(stage, project.mode),
+      input: stageInput(stage, project, priorResults(history), tools),
+    });
+    const output = verifyClaims(response.output, recordedToolEvidence(history, tools));
+    const saved = saveCompletedStage({
+      runId,
+      stage,
+      attempt,
+      ref,
+      response,
+      output,
+      tools,
+      isDeepPass: false,
+      advanceTo: { stageIndex: run.currentStage + 1 },
+    });
+    return {
+      stage,
+      status: saved.status,
+      stageResultId: saved.stageResultId,
+      result: { ...response, output },
+    };
+  } catch (error) {
+    const detail =
+      error instanceof ProviderError
+        ? { provider: error.provider, code: error.code, message: error.message, retryable: error.retryable }
+        : {
+            code: "unexpected",
+            message: error instanceof Error ? error.message : "Unexpected stage failure",
+            retryable: false,
+          };
+    saveFailedStage(runId, stage, attempt, ref, tools, detail);
+    throw new ApiError(error instanceof ProviderError ? error.status : 500, detail.message, detail);
+  }
+}
+
+/**
+ * A manually approved, more expensive second look at proofs or critique. It is saved next to the
+ * normal result (never over it) and does not move the run forward.
+ */
+export async function deepenStage(ownerId: string, runId: string, stage: StageId, ref: ModelRef) {
+  if (stage !== "proofs" && stage !== "critique")
+    throw new ApiError(400, "Only proof and critique stages can receive a deep pass.");
+  if (ref.maxOutputTokens > MAX_DEEP_PASS_TOKENS)
+    throw new ApiError(400, "Deep passes are limited to 5,000 output tokens.");
+
+  const run = getOwnedRun(ownerId, runId);
+  const project = serializeProject(getOwnedProject(ownerId, run.projectId));
+  const history = getDb()
+    .select()
+    .from(stageResults)
+    .where(eq(stageResults.runId, runId))
+    .orderBy(stageResults.createdAt)
+    .all();
+
+  try {
+    const response = await getProvider().generateStructured({
+      model: ref.model,
+      reasoning: ref.reasoning,
+      maxOutputTokens: ref.maxOutputTokens,
+      instructions: `${stageInstructions(stage, project.mode)}\nThis is a manually approved deep pass. Critically improve the earlier result without hiding it.`,
+      input: stageInput(stage, project, priorResults(history), []),
+    });
+    const output = verifyClaims(response.output, recordedToolEvidence(history, []));
+    const { stageResultId } = saveCompletedStage({
+      runId,
+      stage,
+      attempt: 1,
+      ref,
+      response,
+      output,
+      tools: [],
+      isDeepPass: true,
+    });
+    return { stageResultId, result: { ...response, output } };
+  } catch (error) {
+    if (error instanceof ProviderError) {
+      throw new ApiError(error.status, error.message, {
+        provider: error.provider,
+        code: error.code,
+        retryable: error.retryable,
+      });
+    }
+    throw error;
+  }
+}

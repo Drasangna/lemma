@@ -49,11 +49,10 @@ Requires Node.js 22.13+ and an [OpenRouter](https://openrouter.ai/keys) API key.
 ```sh
 npm install
 cp .env.example .env.local     # then add your OPENROUTER_API_KEY
-npm run db:migrate
 npm run dev
 ```
 
-Open <http://localhost:3000> — no sign-in, no cloud account, no deployment. Your data lives in a local SQLite file (`./data/lemma.db` by default).
+Open <http://localhost:3000> — no sign-in, no cloud account, no deployment. Your data lives in a local SQLite file (`./data/lemma.db` by default) that creates and updates itself on first use.
 
 New to the workflow? **[HOW_TO_USE.md](HOW_TO_USE.md)** is a full walkthrough written for a mathematician, not a developer — installing Node, getting a key, creating your first project, reading the audit labels, exporting a dossier.
 
@@ -72,23 +71,26 @@ Keys are read from the server environment only — never written to the database
 ## Project structure
 
 ```
-app/                    UI (research workspace, API routes, WebMCP tools)
+app/                    Next-style App Router: the page and the API routes (thin, built on lib/http.ts)
+components/workspace/   The UI: one state hook (use-workspace.ts) plus one file per tab/panel
 lib/
-  orchestrator.ts       stage transitions, claim verification, persistence
-  providers/            the OpenRouter adapter and shared request/error helpers
-  tools/                the literature search and bounded graph kernel
-  run-profiles.ts       built-in economy/mixed/deep model profiles
-db/                     Drizzle schema and local SQLite connection
-drizzle/                generated SQL migrations
-tests/                  provider contract, schema/profile, and combinatorics tests
+  research-types.ts     Every schema and type — read this first
+  orchestrator.ts       Runs one pipeline stage and saves it atomically
+  claim-verification.ts The claim policy (what may be labeled source/computation-supported)
+  stage-prompts.ts      Prompt text per stage, in "prove" and "expand" mode
+  tools/                Literature search and the computation-kernel registry
+  providers/            The OpenRouter adapter (and the interface for adding another)
+  repository.ts         All database access, scoped by owner
+db/                     Drizzle schema and the auto-migrating SQLite connection
+tests/                  Unit tests plus end-to-end API tests (network mocked)
 ```
+
+Adding a model, a field-specific computation kernel, an API route, or a database column each takes a few lines — see **[CONTRIBUTING.md](CONTRIBUTING.md)** for the walkthrough.
 
 ## Testing
 
 ```sh
-npm test          # unit tests (mocked providers, schema validation, graph kernel)
-npm run lint
-npx tsc --noEmit
+npm run check     # typecheck + lint + all tests (network mocked; never spends credits)
 npm run build
 ```
 
@@ -98,3 +100,4 @@ Live model calls are opt-in only — nothing in the test suite spends real credi
 
 - **[HOW_TO_USE.md](HOW_TO_USE.md)** — the researcher's guide: install, run, and use the workspace end to end.
 - **[IMPLEMENTATION_HANDOFF.md](IMPLEMENTATION_HANDOFF.md)** — full architecture, design invariants, and history for whoever picks this up next.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — architecture map and recipes for contributors.

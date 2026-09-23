@@ -1,0 +1,11 @@
+node_modules
+dist
+.vinext
+.next
+drizzle
+vendor
+components/ui
+package-lock.json
+data
+*.md
+.claude

@@ -1,10 +1,9 @@
-import type { Metadata } from "next";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Lemma — AI Mathematics Research",
-  description: "A private, local workspace for auditable combinatorics research.",
+  description: "A private, local workspace for auditable, AI-assisted mathematics research.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

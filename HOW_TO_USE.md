@@ -48,10 +48,9 @@ OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
 
 Save the file. This file is never uploaded or shared anywhere — it's your local secret.
 
-Now set up the local database and start the app:
+Now start the app (the local database creates itself the first time it is used):
 
 ```sh
-npm run db:migrate
 npm run dev
 ```
 
@@ -63,7 +62,7 @@ To stop the app later, go back to the terminal and press `Ctrl+C`. To use it aga
 
 1. Press the plus button next to **Research files**.
 2. Open the **Problem specification** tab.
-3. Enter a clear title and the mathematical statement you're investigating.
+3. Enter a clear title and the mathematical statement you're investigating. LaTeX works between dollar signs — for example `$e(G) \le n^2/4$` — and is typeset for you.
 4. Enter the **Field** — any area of mathematics (e.g. "combinatorics," "number theory," "analysis"). This is descriptive text, not a fixed list.
 5. Choose a **Mode**: **Prove from scratch** if you're starting from an open conjecture, or **Expand an existing proof** if you already have a proof and want Lemma to find supporting sources and propose generalizations or corollaries.
 6. Enter definitions, one per line.
@@ -71,7 +70,7 @@ To stop the app later, go back to the terminal and press `Ctrl+C`. To use it aga
 8. Enter known results, one per line — distinguish facts you know from results you merely suspect.
 9. In **Expand an existing proof** mode, paste your existing proof or argument into the **Existing proof** field that appears — Lemma treats this as given context, not something to re-derive.
 10. If your field is combinatorics or graph theory, set the minimum and maximum vertex bounds — the built-in computation engine can exhaustively check small graphs (the triangle-free benchmark below works through 6 vertices). This step only appears for combinatorics/graph-flavored fields; other fields rely on literature search alone for now.
-11. Optionally add a citation title, a public `https://` URL, and a pasted abstract or note.
+11. Optionally add any number of citations with **Add source**: a title, a public `https://` URL, and a pasted abstract or note.
 12. Select **Create research file**.
 
 Private-network, local, and non-HTTPS source URLs are rejected. A citation you paste in yourself is not automatically treated as verified — see the labels below.
@@ -136,7 +135,7 @@ Rerouting can use a different model's quota. Lemma never infers permission to sw
 
 ## 9. Run a deeper critique
 
-Once a run exists, the audit panel on the right offers one or more **Deepen with \<model\>** buttons (only models you've marked as "deep" in your OpenRouter setup show up here).
+Once a run exists, the audit panel on the right offers one or more **Deepen with \<model\>** buttons (these are the higher-capability models Lemma designates as "deep").
 
 A deep pass:
 
